@@ -108,7 +108,14 @@ class CameraSource:
             self._hls_url = url
             self._hls_resolved_at = time.time()
 
-    def _latest_segment_url(self):
+    def _new_segment_urls(self):
+        """Returns every segment listed in the playlist that's newer than
+        the last one we consumed (in order), not just the single latest
+        one. Needed because a short-segment source (e.g. IPCamLive's ~1s
+        segments) rolls over faster than one playlist-fetch-then-segment-
+        fetch round trip can keep up with one-at-a-time -- YouTube's
+        5-6s segments never had this problem, but batching costs nothing
+        for them either (there's usually just one new segment anyway)."""
         with self.lock:
             stale = self._hls_url is None or time.time() - self._hls_resolved_at > URL_REFRESH_S
         if stale:
@@ -118,17 +125,28 @@ class CameraSource:
         resp.raise_for_status()
         lines = [l for l in resp.text.splitlines() if l and not l.startswith("#")]
         if not lines:
-            return None
+            return []
         # YouTube always gives absolute segment URLs; other HLS providers
         # (e.g. IPCamLive) give paths relative to the playlist -- urljoin
         # handles both.
-        seg_url = urljoin(self._hls_url, lines[-1])
-        m = re.search(r"/sq/(\d+)/", seg_url)
-        seq = m.group(1) if m else lines[-1]  # fall back to filename as dedup key
-        if seq == self._last_seg_seq:
-            return None  # no new segment yet
-        self._last_seg_seq = seq
-        return seg_url
+        urls = [urljoin(self._hls_url, l) for l in lines]
+
+        def seg_key(u):
+            m = re.search(r"/sq/(\d+)/", u)
+            return m.group(1) if m else u  # fall back to filename as dedup key
+
+        keys = [seg_key(u) for u in urls]
+        if self._last_seg_seq is None:
+            # First call: just take the newest, so we don't dump this
+            # source's whole current playlist window as an initial burst.
+            new_urls = [urls[-1]]
+        elif self._last_seg_seq in keys:
+            new_urls = urls[keys.index(self._last_seg_seq) + 1:]
+        else:
+            new_urls = urls  # our last segment fell off the sliding window
+        if new_urls:
+            self._last_seg_seq = keys[-1]
+        return new_urls
 
     def _publish(self, jpeg_bytes):
         with self.lock:
@@ -140,16 +158,20 @@ class CameraSource:
         with self.lock:
             return time.time() - self._last_touch > IDLE_TIMEOUT_S
 
-    def _fetch_next_segment(self, deadline):
-        """Poll for a new HLS segment and fetch it, retrying until one
-        appears (the playlist doesn't roll over instantly) or deadline."""
+    def _fetch_next_segments(self, deadline):
+        """Poll for new HLS segments and fetch all of them, retrying until
+        at least one appears (the playlist doesn't roll over instantly) or
+        deadline."""
         while time.time() < deadline and not self._idle_too_long():
             try:
-                seg_url = self._latest_segment_url()
-                if seg_url is not None:
-                    resp = requests.get(seg_url, timeout=10)
-                    resp.raise_for_status()
-                    return resp.content
+                urls = self._new_segment_urls()
+                if urls:
+                    blobs = []
+                    for u in urls:
+                        resp = requests.get(u, timeout=10)
+                        resp.raise_for_status()
+                        blobs.append(resp.content)
+                    return blobs
             except Exception as e:
                 print(f"[{self.cfg['id']}] segment fetch error: {e}")
             time.sleep(1)
@@ -161,10 +183,11 @@ class CameraSource:
         one continuous stream instead of isolated per-segment inputs."""
         try:
             while not self._idle_too_long():
-                seg_bytes = self._fetch_next_segment(time.time() + 10)
-                if seg_bytes is None:
+                blobs = self._fetch_next_segments(time.time() + 10)
+                if not blobs:
                     continue
-                proc.stdin.write(seg_bytes)
+                for seg_bytes in blobs:
+                    proc.stdin.write(seg_bytes)
                 proc.stdin.flush()
         except (BrokenPipeError, OSError):
             pass
