@@ -1,8 +1,7 @@
 // Windy Webcams API (https://api.windy.com/webcams/docs) client.
-// NOTE: the exact response schema (nesting of location/images fields) is
-// assumed from third-party source, not verified against live docs -- see
-// the parsing fallbacks in Webcams.cpp. First live run should confirm/
-// correct field names.
+// Response schema confirmed live (2026-09-24): the default response omits
+// `images`/`location` entirely unless requested via `include=images,location`
+// -- see fetchList().
 #pragma once
 #include <stdint.h>
 

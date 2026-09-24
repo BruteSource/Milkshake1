@@ -51,7 +51,10 @@ bool pickLatLon(JsonObjectConst cam, double* lat, double* lon) {
 
 int fetchList(Webcam* out, int maxCount) {
     char url[128];
-    snprintf(url, sizeof(url), "https://api.windy.com/webcams/api/v3/webcams?limit=%d", maxCount);
+    // include=images,location -- the default response omits both; without
+    // this every webcam has no usable image URL and gets skipped below.
+    snprintf(url, sizeof(url),
+             "https://api.windy.com/webcams/api/v3/webcams?limit=%d&include=images,location", maxCount);
 
     http::Header headers[] = {{"x-windy-api-key", WINDY_API_KEY}};
     uint8_t* buf = nullptr;
