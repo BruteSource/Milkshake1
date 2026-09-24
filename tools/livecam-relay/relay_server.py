@@ -35,12 +35,20 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urljoin
 
 import requests
 
 from cameras import CAMERAS, CATEGORIES
 
-FFMPEG = str(Path.home() / ".local/bin/ffmpeg")
+# The static johnvansickle.com ffmpeg build in ~/.local/bin crashes on two
+# separate, unrelated inputs found so far: any https:// URL fed directly to
+# it (worked around by always feeding local bytes -- see module docstring),
+# and this roster's IPCamLive-sourced segment (a real MPEG-TS, not
+# corrupt -- SIGSEGV, exit -11). Switched to the distro-packaged ffmpeg
+# (`apt install ffmpeg`, Ubuntu 6.1.1) 2026-09-24 after confirming it
+# handles both that segment and existing YouTube segments correctly.
+FFMPEG = "/usr/bin/ffmpeg"
 YTDLP = str(Path.home() / ".local/bin/yt-dlp")
 PORT = 8090
 TARGET_FPS = 6  # frames extracted per second of source video. History
@@ -82,6 +90,13 @@ class CameraSource:
                                   name=f"cam-{self.cfg['id']}").start()
 
     def _resolve_hls(self):
+        # A static "hls_url" camera (see cameras.py) bypasses yt-dlp/YouTube
+        # entirely -- its URL doesn't expire, so this just re-affirms it.
+        if "hls_url" in self.cfg:
+            with self.lock:
+                self._hls_url = self.cfg["hls_url"]
+                self._hls_resolved_at = time.time()
+            return
         out = subprocess.run(
             [YTDLP, "-g", "-f", self.cfg["format"], self.cfg["youtube_url"]],
             capture_output=True, text=True, timeout=30,
@@ -104,10 +119,13 @@ class CameraSource:
         lines = [l for l in resp.text.splitlines() if l and not l.startswith("#")]
         if not lines:
             return None
-        seg_url = lines[-1]
+        # YouTube always gives absolute segment URLs; other HLS providers
+        # (e.g. IPCamLive) give paths relative to the playlist -- urljoin
+        # handles both.
+        seg_url = urljoin(self._hls_url, lines[-1])
         m = re.search(r"/sq/(\d+)/", seg_url)
-        seq = int(m.group(1)) if m else None
-        if seq is not None and seq == self._last_seg_seq:
+        seq = m.group(1) if m else lines[-1]  # fall back to filename as dedup key
+        if seq == self._last_seg_seq:
             return None  # no new segment yet
         self._last_seg_seq = seq
         return seg_url
