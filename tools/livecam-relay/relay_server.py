@@ -60,6 +60,7 @@ TARGET_FPS = 6  # frames extracted per second of source video. History
                  # to restore margin.
 IDLE_TIMEOUT_S = 90  # stop pulling a camera this long after its last viewer leaves
 URL_REFRESH_S = 20 * 60  # re-resolve each camera's HLS URL this often (well under the ~6h signed-URL expiry)
+MAX_SEGMENTS_PER_BATCH = 8  # cap on catch-up fetch per playlist poll -- see _new_segment_urls()
 
 
 class CameraSource:
@@ -144,6 +145,17 @@ class CameraSource:
             new_urls = urls[keys.index(self._last_seg_seq) + 1:]
         else:
             new_urls = urls  # our last segment fell off the sliding window
+        # Defensive cap: a genuine live low-latency playlist only ever lists
+        # a handful of recent segments, so "our last segment fell off the
+        # window" should mean a handful of catch-up. A playlist with
+        # thousands of entries means this isn't that -- e.g. YouTube serves
+        # a full DVR-style VOD manifest once a "live" stream has actually
+        # ended. Without this cap, that silently turns into fetching the
+        # entire archive in one go (seen in practice: a camera stuck
+        # "starting" forever with no error, because it was still working
+        # through segment #1 of 8580).
+        if len(new_urls) > MAX_SEGMENTS_PER_BATCH:
+            new_urls = new_urls[-MAX_SEGMENTS_PER_BATCH:]
         if new_urls:
             self._last_seg_seq = keys[-1]
         return new_urls

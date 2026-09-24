@@ -242,20 +242,30 @@ CAMERAS = [
 # Harbor, Museum of Glass, Washington's Evergreen Coast tourism bureau,
 # Necanicum Watershed Council) and individually-operated-but-
 # intentionally-public sources (Westport WA cam, Long Beach eagle cam,
-# PDX/Mt. Hood cam, Space Needle cam) -- same sourcing bar as the rest of
-# the roster. The Space Needle entry comes from an individual streamer
-# (spaceneedlelive) who restarts a new video id per notable event rather
-# than running one persistent stream -- if it goes stale, re-check that
-# channel's /streams for the current one. --
+# PDX/Mt. Hood cam) -- same sourcing bar as the rest of the roster.
+#
+# A Space Needle cam (spaceneedlelive channel) was here 2026-09-24 but
+# was removed the same day: that operator restarts a new video id per
+# notable event instead of running one persistent stream, and once an
+# event passes, YouTube serves that old video's HLS playlist as a
+# giant DVR-style VOD manifest (thousands of segments) instead of
+# erroring -- which looks resolvable but silently breaks a live-segment
+# consumer built around a small rolling window (see MAX_SEGMENTS_PER_BATCH
+# in relay_server.py). If re-adding a Space Needle cam, check that
+# channel's /streams (or /live) tab for a currently-live video first. --
 PNW_CAMERAS = [
     {"id": "seattle-aquarium-otters", "category": "PNW", "title": "Seattle Aquarium Sea Otters",
      "youtube_url": "https://www.youtube.com/watch?v=NqOmHpwMUxs", "format": "230/229"},
-    {"id": "seattle-space-needle", "category": "PNW", "title": "Space Needle (Seattle, WA)",
-     "youtube_url": "https://www.youtube.com/watch?v=3fw5b2zLYEc", "format": "230/229"},
     {"id": "uw-seattle-campus", "category": "PNW", "title": "University of Washington Campus",
      "youtube_url": "https://www.youtube.com/watch?v=4cgSE12k9Sc", "format": "230/229"},
     {"id": "tacoma-pierce-county", "category": "PNW", "title": "Tacoma Skyline & Thea Foss Waterway",
      "youtube_url": "https://www.youtube.com/watch?v=JkgfWXFz1N4", "format": "230/229"},
+    # Only actually streaming during Hot Shop glassblowing demo hours --
+    # outside those, YouTube serves a frozen/non-advancing manifest for
+    # this video id, so the relay correctly gets zero new segments,
+    # self-heals via the normal idle timeout, and this cell falls back to
+    # text. Not a bug, same category as the roster's daytime-only zoo/
+    # aquarium cams.
     {"id": "tacoma-museum-glass", "category": "PNW", "title": "Tacoma Museum of Glass Hot Shop",
      "youtube_url": "https://www.youtube.com/watch?v=qqWaK_DMpE4", "format": "230/229"},
     {"id": "portland-pdx-mt-hood", "category": "PNW", "title": "Portland, OR (PDX & Mt. Hood)",
