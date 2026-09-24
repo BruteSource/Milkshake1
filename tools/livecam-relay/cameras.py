@@ -281,8 +281,12 @@ PNW_CAMERAS = [
     # streamid; IPCamLive serves HLS at a predictable
     # https://<server>/streams/<streamid>/stream.m3u8 path. Static URL, no
     # yt-dlp/expiry involved -- see relay_server.py's "hls_url" cfg key.
+    # Native source is 1920x1080 (confirmed via ffprobe) with no lower-res
+    # option like YouTube's itags -- "scale": 640 caps it before encoding,
+    # since full-res JPEGs were too slow for the ESP32 to decode+draw
+    # smoothly at TARGET_FPS even though the relay delivered them fine.
     {"id": "portland-pioneer-square", "category": "PNW", "title": "Pioneer Courthouse Square (Portland, OR)",
-     "hls_url": "https://s60.ipcamlive.com/streams/3c7igfub1y2owpmfs/stream.m3u8"},
+     "hls_url": "https://s60.ipcamlive.com/streams/3c7igfub1y2owpmfs/stream.m3u8", "scale": 640},
 ]
 CAMERAS += PNW_CAMERAS
 

@@ -242,9 +242,19 @@ class CameraSource:
         # which also keeps segment fetch+decode overlapping with playback
         # (the earlier prefetch-thread fix is now subsumed by this).
         print(f"[{self.cfg['id']}] starting")
+        # YouTube sources already pick a low-res itag (229/230, <=640px
+        # wide), so no scale filter needed. Non-YouTube sources (e.g.
+        # IPCamLive) may be native 1080p+ with no low-res option -- an
+        # optional "scale" cfg key (target width, aspect-preserved via -2)
+        # caps those before JPEG encoding, since a full-res frame both
+        # wastes bandwidth and is slow enough to decode+draw on the ESP32
+        # to look choppy even when the relay delivers it smoothly.
+        vf = f"fps={TARGET_FPS}"
+        if self.cfg.get("scale"):
+            vf = f"scale={self.cfg['scale']}:-2," + vf
         proc = subprocess.Popen(
             [FFMPEG, "-loglevel", "error", "-i", "pipe:0",
-             "-vf", f"fps={TARGET_FPS}", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1"],
+             "-vf", vf, "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1"],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
         )
         writer = threading.Thread(target=self._writer_loop, args=(proc,), daemon=True,
