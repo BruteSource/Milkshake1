@@ -11,12 +11,11 @@ constexpr int PIN_SCL = 15;
 constexpr int PIN_RST = 18;
 constexpr int PIN_INT = 17;
 
-// Reference project's proven default for rotation 1, unmeasured on this
-// specific unit -- see PR #1 for the real corner-tap calibration pending.
-// Screen X is driven by native Y span 16..306; screen Y by native X span
-// 20..230.
-constexpr int16_t CAL_SX_AT_LEFT = 16, CAL_SX_AT_RIGHT = 306;
-constexpr int16_t CAL_SY_AT_TOP = 20, CAL_SY_AT_BOTTOM = 230;
+// Measured on this specific unit via 4-corner tap (PR #1, commit 9b31b41
+// discussion). Screen X is driven by native Y span 289..8 (inverted --
+// map() handles that fine); screen Y by native X span 10..227.
+constexpr int16_t CAL_SX_AT_LEFT = 289, CAL_SX_AT_RIGHT = 8;
+constexpr int16_t CAL_SY_AT_TOP = 10, CAL_SY_AT_BOTTOM = 227;
 
 bool s_down = false;
 int16_t s_x0 = 0, s_y0 = 0;
