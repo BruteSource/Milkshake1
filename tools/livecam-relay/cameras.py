@@ -235,6 +235,23 @@ CAMERAS = [
     {"id": "earthcam-venice-rialto", "category": "Scenic World", "title": "Venice, Rialto Bridge",
      "youtube_url": "https://www.youtube.com/watch?v=x4AlaibltlA", "format": "230/229"},
 
+    # -- Pacific Northwest (Seattle Aquarium, University of Washington, a
+    # Pierce County govt cam, and an individually-operated PDX/Mt. Hood
+    # cam). The Space Needle entry comes from an individual streamer
+    # (spaceneedlelive) who restarts a new video id per notable event
+    # rather than running one persistent stream -- if it goes stale,
+    # re-check that channel's /streams for the current one. --
+    {"id": "seattle-aquarium-otters", "category": "Scenic World", "title": "Seattle Aquarium Sea Otters",
+     "youtube_url": "https://www.youtube.com/watch?v=NqOmHpwMUxs", "format": "230/229"},
+    {"id": "seattle-space-needle", "category": "Scenic World", "title": "Space Needle (Seattle, WA)",
+     "youtube_url": "https://www.youtube.com/watch?v=3fw5b2zLYEc", "format": "230/229"},
+    {"id": "uw-seattle-campus", "category": "Scenic World", "title": "University of Washington Campus",
+     "youtube_url": "https://www.youtube.com/watch?v=4cgSE12k9Sc", "format": "230/229"},
+    {"id": "tacoma-pierce-county", "category": "Scenic World", "title": "Tacoma Skyline & Thea Foss Waterway",
+     "youtube_url": "https://www.youtube.com/watch?v=JkgfWXFz1N4", "format": "230/229"},
+    {"id": "portland-pdx-mt-hood", "category": "Scenic World", "title": "Portland, OR (PDX & Mt. Hood)",
+     "youtube_url": "https://www.youtube.com/watch?v=VaZn-A4fwNg", "format": "230/229"},
+
     # -- Kittens & Puppies (explore.org's Kitten Rescue LA + partner service-dog orgs) --
     {"id": "kitten-rescue-cam", "category": "Kittens & Puppies", "title": "Kitten Rescue Cat Cam (LA)",
      "youtube_url": "https://www.youtube.com/watch?v=-m_nQT62B4Y", "format": "230/229"},
