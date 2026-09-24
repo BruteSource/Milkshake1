@@ -88,7 +88,11 @@ CAMERAS = [
 
     # -- Birds (Cornell Lab of Ornithology's official bird cam network --
     # @CornellBirdCams, @CornellLabBirdCams-Channel2 -- plus explore.org's
-    # Decorah eagles) --
+    # Decorah eagles, the Owl Research Institute's own channel, The
+    # Jollyville Screech Owl House, and Scottish Wildlife Trust's Loch of
+    # the Lowes osprey nest. Note: several well-known nest-box cams (Cornell
+    # Kestrel, Dyfi Osprey) are seasonal breeders and were offline when this
+    # roster was compiled (September) -- worth rechecking in spring.) --
     {"id": "decorah-eagles", "category": "Birds", "title": "Decorah Eagles North Nest",
      "youtube_url": "https://www.youtube.com/watch?v=GGIE1E-kaMQ", "format": "229"},
     {"id": "cornell-royal-albatross", "category": "Birds", "title": "Royal Albatross Cam (NZ)",
@@ -107,6 +111,14 @@ CAMERAS = [
      "youtube_url": "https://www.youtube.com/watch?v=1UAB3IsxE4U", "format": "229"},
     {"id": "cornell-hawk-fernow", "category": "Birds", "title": "Cornell Hawks Fernow Nest",
      "youtube_url": "https://www.youtube.com/watch?v=jaNayeUXb2Y", "format": "229"},
+    {"id": "jollyville-screech-owl", "category": "Birds", "title": "Jollyville Screech Owl House",
+     "youtube_url": "https://www.youtube.com/watch?v=F1NOXW7CO-M", "format": "229"},
+    {"id": "ori-long-eared-owl", "category": "Birds", "title": "Long-Eared Owl Roost (Montana)",
+     "youtube_url": "https://www.youtube.com/watch?v=uNwirazDdHg", "format": "229"},
+    {"id": "ori-burrowing-owl", "category": "Birds", "title": "Burrowing Owl Nest (Oregon)",
+     "youtube_url": "https://www.youtube.com/watch?v=ZGAf77sGw6Q", "format": "229"},
+    {"id": "loch-lowes-osprey", "category": "Birds", "title": "Loch of the Lowes Osprey Nest",
+     "youtube_url": "https://www.youtube.com/watch?v=EbA5WQane08", "format": "229"},
 
     # -- More (wolves, kittens) --
     {"id": "wolf-center", "category": "More", "title": "International Wolf Center",
