@@ -136,12 +136,6 @@ CAMERAS = [
     {"id": "robin-nest-nashville", "category": "Birds", "title": "Robin Nest Cam (Nashville, TN)",
      "youtube_url": "https://www.youtube.com/watch?v=TZYzWZZpmBo", "format": "230/229"},
 
-    # -- More (wolves, kittens) --
-    {"id": "wolf-center", "category": "More", "title": "International Wolf Center",
-     "youtube_url": "https://www.youtube.com/watch?v=5e4lsEe4Vew", "format": "230/229"},
-    {"id": "kitten-rescue", "category": "More", "title": "Kitten Rescue Cat Cam",
-     "youtube_url": "https://www.youtube.com/watch?v=-m_nQT62B4Y", "format": "230/229"},
-
     # -- Scenic World (EarthCam's officially-operated landmark/city network,
     # @EarthCam, plus one SkylineWebcams single-location stream -- Venice --
     # their other streams are multi-camera compilation mixes, not usable
@@ -252,6 +246,10 @@ CAMERAS = [
      "youtube_url": "https://www.youtube.com/watch?v=QF2ojZmSTWs", "format": "230/229"},
     {"id": "ecad-class", "category": "Kittens & Puppies", "title": "ECAD Puppy Training Class",
      "youtube_url": "https://www.youtube.com/watch?v=V5RfI6dXZgY", "format": "230/229"},
+
+    # -- More (miscellaneous wildlife that doesn't fit another category) --
+    {"id": "wolf-center", "category": "More", "title": "International Wolf Center",
+     "youtube_url": "https://www.youtube.com/watch?v=5e4lsEe4Vew", "format": "230/229"},
 ]
 
 CATEGORIES = sorted({c["category"] for c in CAMERAS})
