@@ -521,7 +521,16 @@ void loop() {
             uint8_t* buf = nullptr;
             size_t len = 0;
             if (g_mjpegClient.nextFrame(&buf, &len)) {
-                lcd.drawJpg(buf, len, 0, 0, OT_W, OT_H);
+                // Height is OT_H-14, not OT_H: the title bar below (drawn
+                // right after, in fillRect+println) needs that strip to
+                // stay untouched by the frame itself. Drawing the JPEG into
+                // the full screen and then immediately covering the bottom
+                // 14px with the black bar was a two-step draw -- for a
+                // moment between those calls, real frame pixels were
+                // visible in what should always be the black title strip
+                // (most noticeable right when a stream connects/reconnects
+                // and the first frame lands).
+                lcd.drawJpg(buf, len, 0, 0, OT_W, OT_H - 14);
                 livecams::Camera& cam = g_liveCams[g_liveFilteredIdx[g_selected]];
                 lcd.fillRect(0, OT_H - 14, OT_W, 14, TFT_BLACK);
                 lcd.setCursor(2, OT_H - 12);
