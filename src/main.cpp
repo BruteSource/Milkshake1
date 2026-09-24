@@ -23,7 +23,7 @@ LGFX lcd;
 constexpr int kPerPage = 4;
 int g_page = 0;
 
-constexpr int kMaxLiveCams = 100;
+constexpr int kMaxLiveCams = 130;
 livecams::Camera g_liveCams[kMaxLiveCams];
 int g_liveCamCount = 0;
 char g_liveCategories[8][24];
@@ -137,6 +137,58 @@ void cellRect(int slot, int* x, int* y, int* w, int* h) {
     *h = kCellH;
 }
 
+// Word-wraps text to fit within w pixels (textSize 1, ~6px/char), drawing
+// up to maxLines centered vertically in [y, y+h). Longer titles get
+// truncated on the last line rather than overflowing the cell.
+void drawWrappedText(int x, int y, int w, int h, const char* text) {
+    constexpr int kCharW = 6;
+    constexpr int kLineH = 10;
+    constexpr int kMaxLines = 6;
+    int maxChars = max(1, (w - 8) / kCharW);
+
+    String lines[kMaxLines];
+    int lineCount = 0;
+    String cur;
+    String word;
+    size_t len = strlen(text);
+    for (size_t i = 0; i <= len && lineCount < kMaxLines; i++) {
+        char c = i < len ? text[i] : ' ';
+        if (c == ' ') {
+            if (word.length() > 0) {
+                while ((int)word.length() > maxChars) {
+                    if (cur.length() > 0) { lines[lineCount++] = cur; cur = ""; }
+                    if (lineCount >= kMaxLines) break;
+                    lines[lineCount++] = word.substring(0, maxChars);
+                    word = word.substring(maxChars);
+                }
+                if (lineCount >= kMaxLines) break;
+                if (cur.length() == 0) cur = word;
+                else if ((int)(cur.length() + 1 + word.length()) <= maxChars) { cur += " "; cur += word; }
+                else { lines[lineCount++] = cur; cur = word; }
+                word = "";
+            }
+        } else {
+            word += c;
+        }
+    }
+    if (cur.length() > 0 && lineCount < kMaxLines) lines[lineCount++] = cur;
+
+    int visibleLines = min(lineCount, max(1, h / kLineH));
+    if (visibleLines < lineCount && visibleLines > 0) {
+        String& last = lines[visibleLines - 1];
+        int room = maxChars - 3;
+        if (room > 0 && (int)last.length() > room) last = last.substring(0, room);
+        last += "...";
+    }
+
+    int totalH = visibleLines * kLineH;
+    int startY = y + (h - totalH) / 2;
+    for (int i = 0; i < visibleLines; i++) {
+        lcd.setCursor(x + 4, startY + i * kLineH);
+        lcd.print(lines[i]);
+    }
+}
+
 // --- Live nature cams (relay-backed, real motion at ~2fps) ---------------
 
 void buildLiveCategories() {
@@ -230,28 +282,14 @@ void drawLiveGridCell(int slot, int filteredIdx) {
     if (filteredIdx >= g_liveFilteredCount) return;
     livecams::Camera& cam = g_liveCams[g_liveFilteredIdx[filteredIdx]];
 
-    lcd.setCursor(x + 4, y + 4);
-    lcd.setTextSize(1);
-    lcd.setTextColor(TFT_DARKGREY, TFT_BLACK);
-    lcd.print("loading...");
-
-    uint8_t* buf = nullptr;
-    size_t len = 0;
-    if (!livecams::fetchJpeg(cam.id, &buf, &len)) {
-        lcd.fillRect(x + 1, y + 1, w - 2, h - 2, TFT_BLACK);
-        lcd.setCursor(x + 4, y + h / 2);
-        lcd.setTextColor(TFT_RED, TFT_BLACK);
-        lcd.print("fetch failed");
-        return;
-    }
+    // Text-only for now -- per-cell JPEG thumbnails (livecams::fetchJpeg)
+    // were taking a very long time or failing outright while the relay's
+    // higher-bitrate format switch settles under load. Flip back to a
+    // drawJpg call here once that's confirmed stable.
     lcd.fillRect(x + 1, y + 1, w - 2, h - 2, TFT_BLACK);
-    lcd.drawJpg(buf, len, x + 1, y + 1, w - 2, h - 14, 0, 0, 0.0f, 0.0f, middle_center);
-    free(buf);
-
-    lcd.fillRect(x + 1, y + h - 13, w - 2, 12, TFT_BLACK);
-    lcd.setCursor(x + 3, y + h - 12);
+    lcd.setTextSize(1);
     lcd.setTextColor(TFT_WHITE, TFT_BLACK);
-    lcd.print(cam.title);
+    drawWrappedText(x + 1, y + 1, w - 2, h - 2, cam.title);
 }
 
 void drawLiveGrid() {
@@ -530,7 +568,9 @@ void loop() {
                 // visible in what should always be the black title strip
                 // (most noticeable right when a stream connects/reconnects
                 // and the first frame lands).
-                lcd.drawJpg(buf, len, 0, 0, OT_W, OT_H - 14);
+                uint32_t t0 = micros();
+                lcd.drawJpg(buf, len, 0, 0, OT_W, OT_H - 14, 0, 0, 0.0f, 0.0f, middle_center);
+                uint32_t drawUs = micros() - t0;
                 livecams::Camera& cam = g_liveCams[g_liveFilteredIdx[g_selected]];
                 lcd.fillRect(0, OT_H - 14, OT_W, 14, TFT_BLACK);
                 lcd.setCursor(2, OT_H - 12);
@@ -538,6 +578,22 @@ void loop() {
                 lcd.setTextColor(TFT_WHITE, TFT_BLACK);
                 lcd.println(cam.title);
                 g_lastMjpegFrame = millis();
+
+                // Temporary instrumentation: how long does decode+draw of one
+                // frame actually take on this chip? Logged every 10 frames so
+                // it doesn't flood serial. This is the real fps ceiling we're
+                // probing -- see whether it's well under the relay's frame
+                // interval (headroom to push relay fps higher) or close to it
+                // (device-side ceiling).
+                static uint32_t frameCount = 0;
+                static uint32_t drawUsSum = 0;
+                frameCount++;
+                drawUsSum += drawUs;
+                if (frameCount % 10 == 0) {
+                    Serial.printf("[perf] drawJpg avg %lu us/frame over last 10 (len=%u)\n",
+                                  (unsigned long)(drawUsSum / 10), (unsigned)len);
+                    drawUsSum = 0;
+                }
             }
         }
         if (millis() - g_lastMjpegFrame > 20000) {
