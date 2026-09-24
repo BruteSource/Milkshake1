@@ -1,8 +1,10 @@
-// CYD-Milkshake: browse public webcams (Windy Webcams API) by region, in a
-// paginated thumbnail grid, and view a periodically-refreshed snapshot on
-// tap. Not true live video -- this hardware can't decode video streams, so
-// "live" means re-fetching the JPEG snapshot on an interval, matching how
-// the source webcams themselves typically update.
+// CYD-Milkshake: browse live nature cams (bears, elephants, reefs, owl
+// nests, scenic world landmarks, etc.) by category, in a paginated
+// thumbnail grid, and watch real ~2fps motion in the viewer. The board
+// can't decode video itself (no H.264/HLS support), so a local relay
+// (tools/livecam-relay/) transcodes each YouTube Live source into plain
+// MJPEG the board can pull directly -- see src/net/Mjpeg.h and
+// src/net/Livecams.h.
 #include <Arduino.h>
 #include <esp_sleep.h>
 #include <driver/rtc_io.h>
@@ -10,8 +12,6 @@
 #include "hw/Display.h"
 #include "hw/Touch.h"
 #include "hw/Wifi.h"
-#include "net/Http.h"
-#include "net/Webcams.h"
 #include "net/Livecams.h"
 #include "net/Mjpeg.h"
 #include "Secrets.h"
@@ -20,10 +20,7 @@ namespace {
 
 LGFX lcd;
 
-constexpr int kMaxWebcams = 40;
 constexpr int kPerPage = 4;
-webcams::Webcam g_webcams[kMaxWebcams];
-int g_webcamCount = 0;
 int g_page = 0;
 
 constexpr int kMaxLiveCams = 100;
@@ -41,89 +38,96 @@ uint32_t g_lastMjpegFrame = 0;
 // Soft sleep: dim the panel and pause network polling after 2 min idle,
 // instant wake on any touch. Deep sleep: after 5 min idle (independent of
 // soft sleep), real hardware deep sleep -- only the BOOT button (GPIO0,
-// RTC-capable) can wake it, which means a full reboot back to the Home
-// screen, not a resume.
+// RTC-capable) can wake it, which means a full reboot back to the category
+// list, not a resume.
 constexpr uint32_t kSoftSleepMs = 2UL * 60 * 1000;
 constexpr uint32_t kDeepSleepMs = 5UL * 60 * 1000;
 uint32_t g_lastActivity = 0;
 bool g_softAsleep = false;
 
-enum class Screen { Home, Regions, Grid, Viewer, LiveCategories, LiveGrid, LiveViewer };
-Screen g_screen = Screen::Home;
+enum class Screen { LiveCategories, LiveGrid, LiveViewer };
+Screen g_screen = Screen::LiveCategories;
 int g_selected = -1;
 
-// 7 regions must fit in OT_H(240) below the 16px header: (240-16)/7 = 32.
-constexpr int kRegionRowHeight = 32;
 constexpr int kHeaderH = 16;
 constexpr int kFooterH = 20;
 constexpr int kGridTop = kHeaderH;
 constexpr int kGridBottom = OT_H - kFooterH;
 constexpr int kCellW = OT_W / 2;
 constexpr int kCellH = (kGridBottom - kGridTop) / 2;
-constexpr uint32_t kRefreshIntervalMs = 15000;
-uint32_t g_lastRefresh = 0;
 
-int pageCount() { return (g_webcamCount + kPerPage - 1) / kPerPage; }
+// --- Shared paginated list screen ----------------------------------------
+// The physical panel's touch is least reliable right at its edges (see
+// docs/HOSYOND_ESP32S3_TARGET.md and the calibration writeup) -- a row
+// sitting flush against y=0 or y=OT_H was hard to hit reliably. LiveCategories
+// keeps a real dead-zone margin top and bottom, with big rows in between,
+// and paginates (reusing the same prev/next footer convention the grid
+// screens use) instead of cramming more rows into less space when a list
+// doesn't fit one page.
+constexpr int kListTopPad = 24;
+constexpr int kListBottomPad = 24;
+constexpr int kListRowH = 40;
 
-void showError(const char* msg) {
-    lcd.fillRect(0, OT_H - 20, OT_W, 20, TFT_BLACK);
-    lcd.setCursor(4, OT_H - 18);
-    lcd.setTextColor(TFT_RED, TFT_BLACK);
-    lcd.setTextSize(1);
-    lcd.println(msg);
+int listItemsPerPage() { return (OT_H - kListTopPad - kListBottomPad) / kListRowH; }
+int listPageCount(int total) {
+    int ipp = listItemsPerPage();
+    return total > 0 ? (total + ipp - 1) / ipp : 1;
 }
 
-// --- Home screen ---------------------------------------------------------
-
-void enterRegions();  // fwd decl, Windy webcam browser (below)
-void enterLiveCategories();  // fwd decl, live nature cams (below)
-
-void drawHome() {
+void drawPaddedList(const char* headerLine, const char* const* labels, int total, int page) {
     lcd.fillScreen(TFT_BLACK);
     lcd.setTextSize(1);
     lcd.setTextColor(TFT_WHITE, TFT_BLACK);
     lcd.setCursor(6, 2);
-    lcd.println("CYD-Milkshake");
-    const char* items[] = {"Live Nature Cams", "Weather Webcams"};
-    constexpr int kRowH = (OT_H - 16) / 2;
-    for (int i = 0; i < 2; i++) {
-        int y = 16 + i * kRowH;
+    lcd.println(headerLine);
+
+    int ipp = listItemsPerPage();
+    int base = page * ipp;
+    for (int i = 0; i < ipp; i++) {
+        int idx = base + i;
+        if (idx >= total) break;
+        int y = kListTopPad + i * kListRowH;
         lcd.drawFastHLine(0, y, OT_W, TFT_DARKGREY);
-        lcd.setCursor(10, y + kRowH / 2 - 8);
+        lcd.setCursor(10, y + kListRowH / 2 - 8);
         lcd.setTextSize(2);
-        lcd.println(items[i]);
+        lcd.println(labels[idx]);
+    }
+
+    int pages = listPageCount(total);
+    if (pages > 1) {
+        lcd.setTextSize(1);
+        lcd.setTextColor(TFT_WHITE, TFT_BLACK);
+        char buf[16];
+        snprintf(buf, sizeof(buf), "page %d/%d", page + 1, pages);
+        lcd.setCursor(OT_W / 2 - 30, OT_H - kListBottomPad + 6);
+        lcd.print(buf);
+        lcd.setCursor(4, OT_H - kListBottomPad + 6);
+        lcd.print(page > 0 ? "< prev" : "");
+        lcd.setCursor(OT_W - 46, OT_H - kListBottomPad + 6);
+        lcd.print(page < pages - 1 ? "next >" : "");
     }
 }
 
-void enterHome() {
-    g_screen = Screen::Home;
-    drawHome();
-}
+// Returns the tapped item's global index, or one of the sentinels below.
+constexpr int kListTapBack = -1;
+constexpr int kListTapPrev = -2;
+constexpr int kListTapNext = -3;
+constexpr int kListTapNone = -4;
 
-// --- Regions screen ---------------------------------------------------
-
-void drawRegions() {
-    lcd.fillScreen(TFT_BLACK);
-    lcd.setTextSize(1);
-    lcd.setTextColor(TFT_WHITE, TFT_BLACK);
-    lcd.setCursor(6, 2);
-    lcd.println("< home  |  select a region");
-    for (int i = 0; i < webcams::kRegionCount; i++) {
-        int y = 16 + i * kRegionRowHeight;
-        lcd.drawFastHLine(0, y, OT_W, TFT_DARKGREY);
-        lcd.setCursor(10, y + 10);
-        lcd.setTextSize(2);
-        lcd.println(webcams::kRegions[i].name);
+int listHitTest(int px, int py, int total, int page) {
+    if (py < kListTopPad) return kListTapBack;
+    if (py >= OT_H - kListBottomPad) {
+        int pages = listPageCount(total);
+        if (px < OT_W / 3 && page > 0) return kListTapPrev;
+        if (px > 2 * OT_W / 3 && page < pages - 1) return kListTapNext;
+        return kListTapNone;
     }
+    int row = (py - kListTopPad) / kListRowH;
+    int idx = page * listItemsPerPage() + row;
+    return idx < total ? idx : kListTapNone;
 }
 
-void enterRegions() {
-    g_screen = Screen::Regions;
-    g_webcamCount = 0;
-    drawRegions();
-}
-
-// --- Grid screen --------------------------------------------------------
+// --- Grid screen (shared layout constants/geometry; live cams only now) --
 
 void cellRect(int slot, int* x, int* y, int* w, int* h) {
     int col = slot % 2, row = slot / 2;
@@ -133,124 +137,7 @@ void cellRect(int slot, int* x, int* y, int* w, int* h) {
     *h = kCellH;
 }
 
-void drawGridChrome() {
-    lcd.fillScreen(TFT_BLACK);
-    lcd.drawFastHLine(0, kGridTop - 1, OT_W, TFT_DARKGREY);
-    lcd.drawFastVLine(kCellW, kGridTop, kGridBottom - kGridTop, TFT_DARKGREY);
-    lcd.drawFastHLine(0, kGridTop + kCellH, OT_W, TFT_DARKGREY);
-    lcd.drawFastHLine(0, kGridBottom, OT_W, TFT_DARKGREY);
-
-    lcd.setTextSize(1);
-    lcd.setTextColor(TFT_WHITE, TFT_BLACK);
-    lcd.setCursor(4, 2);
-    lcd.print("< regions");
-
-    char buf[16];
-    snprintf(buf, sizeof(buf), "page %d/%d", g_page + 1, pageCount());
-    lcd.setCursor(OT_W / 2 - 30, OT_H - kFooterH + 4);
-    lcd.print(buf);
-    lcd.setCursor(4, OT_H - kFooterH + 4);
-    lcd.print(g_page > 0 ? "< prev" : "");
-    lcd.setCursor(OT_W - 46, OT_H - kFooterH + 4);
-    lcd.print(g_page < pageCount() - 1 ? "next >" : "");
-}
-
-void drawGridCell(int slot, int idx) {
-    int x, y, w, h;
-    cellRect(slot, &x, &y, &w, &h);
-    if (idx >= g_webcamCount) return;
-
-    lcd.setCursor(x + 4, y + 4);
-    lcd.setTextSize(1);
-    lcd.setTextColor(TFT_DARKGREY, TFT_BLACK);
-    lcd.print("loading...");
-
-    uint8_t* buf = nullptr;
-    size_t len = 0;
-    if (!http::getBuffered(g_webcams[idx].thumbUrl, nullptr, 0, &buf, &len)) {
-        lcd.fillRect(x + 1, y + 1, w - 2, h - 2, TFT_BLACK);
-        lcd.setCursor(x + 4, y + h / 2);
-        lcd.setTextColor(TFT_RED, TFT_BLACK);
-        lcd.print("fetch failed");
-        return;
-    }
-    lcd.fillRect(x + 1, y + 1, w - 2, h - 2, TFT_BLACK);
-    // scale_x/scale_y = 0.0f triggers LovyanGFX's auto-fit: it scales the
-    // decoded JPEG (whatever its native size) down to fit entirely inside
-    // maxWidth x maxHeight preserving aspect ratio, instead of the default
-    // 1:1 draw-then-clip (which only ever showed the top-left crop of the
-    // source image in a cell this much smaller than the source).
-    lcd.drawJpg(buf, len, x + 1, y + 1, w - 2, h - 14, 0, 0, 0.0f, 0.0f, middle_center);
-    free(buf);
-
-    lcd.fillRect(x + 1, y + h - 13, w - 2, 12, TFT_BLACK);
-    lcd.setCursor(x + 3, y + h - 12);
-    lcd.setTextColor(TFT_WHITE, TFT_BLACK);
-    lcd.print(g_webcams[idx].title);
-}
-
-void drawGrid() {
-    drawGridChrome();
-    int base = g_page * kPerPage;
-    for (int slot = 0; slot < kPerPage; slot++) {
-        drawGridCell(slot, base + slot);
-    }
-}
-
-void enterGrid(int page) {
-    g_page = page;
-    g_screen = Screen::Grid;
-    drawGrid();
-}
-
-void selectRegion(int regionIdx) {
-    lcd.fillScreen(TFT_BLACK);
-    lcd.setCursor(10, 10);
-    lcd.setTextColor(TFT_WHITE, TFT_BLACK);
-    lcd.println("loading webcams...");
-    g_webcamCount = webcams::fetchList(g_webcams, kMaxWebcams, webcams::kRegions[regionIdx].code);
-    Serial.printf("loaded %d webcams for %s\n", g_webcamCount, webcams::kRegions[regionIdx].code);
-    if (g_webcamCount == 0) {
-        lcd.setCursor(10, 30);
-        lcd.setTextColor(TFT_RED, TFT_BLACK);
-        lcd.println("no webcams found");
-        delay(1500);
-        enterRegions();
-        return;
-    }
-    enterGrid(0);
-}
-
-// --- Viewer screen --------------------------------------------------------
-
-void loadAndShowImage(int idx) {
-    if (idx < 0 || idx >= g_webcamCount) return;
-    uint8_t* buf = nullptr;
-    size_t len = 0;
-    if (!http::getBuffered(g_webcams[idx].previewUrl, nullptr, 0, &buf, &len)) {
-        showError("image fetch failed");
-        return;
-    }
-    lcd.fillScreen(TFT_BLACK);
-    lcd.drawJpg(buf, len, 0, 0, OT_W, OT_H);
-    free(buf);
-
-    lcd.fillRect(0, OT_H - 14, OT_W, 14, TFT_BLACK);
-    lcd.setCursor(2, OT_H - 12);
-    lcd.setTextSize(1);
-    lcd.setTextColor(TFT_WHITE, TFT_BLACK);
-    lcd.println(g_webcams[idx].title);
-
-    g_lastRefresh = millis();
-}
-
-void enterViewer(int idx) {
-    g_selected = idx;
-    g_screen = Screen::Viewer;
-    loadAndShowImage(idx);
-}
-
-// --- Live nature cams (relay-backed, real motion at ~1fps) ---------------
+// --- Live nature cams (relay-backed, real motion at ~2fps) ---------------
 
 void buildLiveCategories() {
     g_liveCategoryCount = 0;
@@ -270,37 +157,33 @@ void buildLiveCategories() {
     }
 }
 
+int g_liveCatPage = 0;
+
 void drawLiveCategories() {
-    lcd.fillScreen(TFT_BLACK);
-    lcd.setTextSize(1);
-    lcd.setTextColor(TFT_WHITE, TFT_BLACK);
-    lcd.setCursor(6, 2);
-    lcd.println("< home  |  live nature cams");
-    int rowH = (OT_H - 16) / (g_liveCategoryCount > 0 ? g_liveCategoryCount : 1);
-    for (int i = 0; i < g_liveCategoryCount; i++) {
-        int y = 16 + i * rowH;
-        lcd.drawFastHLine(0, y, OT_W, TFT_DARKGREY);
-        lcd.setCursor(10, y + rowH / 2 - 8);
-        lcd.setTextSize(2);
-        lcd.println(g_liveCategories[i]);
-    }
+    const char* labels[8];
+    for (int i = 0; i < g_liveCategoryCount; i++) labels[i] = g_liveCategories[i];
+    drawPaddedList("< home  |  live nature cams", labels, g_liveCategoryCount, g_liveCatPage);
 }
 
 void enterLiveCategories() {
     g_screen = Screen::LiveCategories;
+    g_liveCatPage = 0;
     if (g_liveCamCount == 0) {
-        lcd.fillScreen(TFT_BLACK);
-        lcd.setCursor(10, 10);
-        lcd.setTextColor(TFT_WHITE, TFT_BLACK);
-        lcd.println("loading cameras...");
-        g_liveCamCount = livecams::fetchList(g_liveCams, kMaxLiveCams);
-        if (g_liveCamCount == 0) {
-            lcd.setCursor(10, 30);
-            lcd.setTextColor(TFT_RED, TFT_BLACK);
-            lcd.println("relay unreachable");
-            delay(1500);
-            enterHome();
-            return;
+        // This is the top-level screen now (no Home to fall back to), so a
+        // relay-unreachable failure retries in place rather than bouncing
+        // anywhere -- there's nowhere else for the user to go.
+        while (g_liveCamCount == 0) {
+            lcd.fillScreen(TFT_BLACK);
+            lcd.setCursor(10, 10);
+            lcd.setTextColor(TFT_WHITE, TFT_BLACK);
+            lcd.println("loading cameras...");
+            g_liveCamCount = livecams::fetchList(g_liveCams, kMaxLiveCams);
+            if (g_liveCamCount == 0) {
+                lcd.setCursor(10, 30);
+                lcd.setTextColor(TFT_RED, TFT_BLACK);
+                lcd.println("relay unreachable, retrying...");
+                delay(2000);
+            }
         }
         buildLiveCategories();
     }
@@ -553,7 +436,7 @@ void setup() {
         return;
     }
 
-    enterHome();
+    enterLiveCategories();
     g_lastActivity = millis();
 }
 
@@ -597,48 +480,14 @@ void loop() {
 
     if (p.pressed && !consumedByWake && !g_softAsleep) {
         switch (g_screen) {
-            case Screen::Home: {
-                if (p.y >= 16) {
-                    bool topHalf = (p.y - 16) < (OT_H - 16) / 2;
-                    if (topHalf) enterLiveCategories();
-                    else enterRegions();
-                }
-                break;
-            }
-            case Screen::Regions: {
-                if (p.y < 16) {
-                    enterHome();
-                    break;
-                }
-                int row = (p.y - 16) / kRegionRowHeight;
-                if (row >= 0 && row < webcams::kRegionCount) selectRegion(row);
-                break;
-            }
-            case Screen::Grid: {
-                if (p.y < kHeaderH) {
-                    enterRegions();
-                } else if (p.y >= kGridBottom) {
-                    if (p.x < OT_W / 3 && g_page > 0) enterGrid(g_page - 1);
-                    else if (p.x > 2 * OT_W / 3 && g_page < pageCount() - 1) enterGrid(g_page + 1);
-                } else {
-                    int col = p.x < kCellW ? 0 : 1;
-                    int row = p.y < kGridTop + kCellH ? 0 : 1;
-                    int idx = g_page * kPerPage + row * 2 + col;
-                    if (idx < g_webcamCount) enterViewer(idx);
-                }
-                break;
-            }
-            case Screen::Viewer:
-                enterGrid(g_page);
-                break;
             case Screen::LiveCategories: {
-                if (p.y < 16) {
-                    enterHome();
-                    break;
-                }
-                int rowH = (OT_H - 16) / (g_liveCategoryCount > 0 ? g_liveCategoryCount : 1);
-                int row = (p.y - 16) / rowH;
-                if (row >= 0 && row < g_liveCategoryCount) selectLiveCategory(row);
+                // No back target -- this is the top-level screen now that
+                // the Windy weather-webcam browser is gone. A tap on the
+                // header dead-zone is just a no-op (kListTapBack).
+                int hit = listHitTest(p.x, p.y, g_liveCategoryCount, g_liveCatPage);
+                if (hit == kListTapPrev) { g_liveCatPage--; drawLiveCategories(); }
+                else if (hit == kListTapNext) { g_liveCatPage++; drawLiveCategories(); }
+                else if (hit >= 0) selectLiveCategory(hit);
                 break;
             }
             case Screen::LiveGrid: {
@@ -688,10 +537,6 @@ void loop() {
             // for its first frame -- yt-dlp resolve + first HLS segment.)
             enterLiveViewer(g_selected);
         }
-    }
-
-    if (g_screen == Screen::Viewer && !g_softAsleep && millis() - g_lastRefresh > kRefreshIntervalMs) {
-        loadAndShowImage(g_selected);
     }
 
     delay(15);
