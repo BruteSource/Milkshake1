@@ -63,6 +63,15 @@ void loadAndShowImage(int idx) {
     lcd.fillScreen(TFT_BLACK);
     lcd.drawJpg(buf, len, 0, 0, OT_W, OT_H);
     free(buf);
+
+    // Title label so tap-to-row accuracy is visually verifiable, not just
+    // "some image loaded".
+    lcd.fillRect(0, OT_H - 14, OT_W, 14, TFT_BLACK);
+    lcd.setCursor(2, OT_H - 12);
+    lcd.setTextSize(1);
+    lcd.setTextColor(TFT_WHITE, TFT_BLACK);
+    lcd.println(g_webcams[idx].title);
+
     g_lastRefresh = millis();
 }
 
