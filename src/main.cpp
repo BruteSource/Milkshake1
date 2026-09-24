@@ -175,7 +175,12 @@ void drawGridCell(int slot, int idx) {
         return;
     }
     lcd.fillRect(x + 1, y + 1, w - 2, h - 2, TFT_BLACK);
-    lcd.drawJpg(buf, len, x + 1, y + 1, w - 2, h - 14);
+    // scale_x/scale_y = 0.0f triggers LovyanGFX's auto-fit: it scales the
+    // decoded JPEG (whatever its native size) down to fit entirely inside
+    // maxWidth x maxHeight preserving aspect ratio, instead of the default
+    // 1:1 draw-then-clip (which only ever showed the top-left crop of the
+    // source image in a cell this much smaller than the source).
+    lcd.drawJpg(buf, len, x + 1, y + 1, w - 2, h - 14, 0, 0, 0.0f, 0.0f, middle_center);
     free(buf);
 
     lcd.fillRect(x + 1, y + h - 13, w - 2, 12, TFT_BLACK);
@@ -357,7 +362,7 @@ void drawLiveGridCell(int slot, int filteredIdx) {
         return;
     }
     lcd.fillRect(x + 1, y + 1, w - 2, h - 2, TFT_BLACK);
-    lcd.drawJpg(buf, len, x + 1, y + 1, w - 2, h - 14);
+    lcd.drawJpg(buf, len, x + 1, y + 1, w - 2, h - 14, 0, 0, 0.0f, 0.0f, middle_center);
     free(buf);
 
     lcd.fillRect(x + 1, y + h - 13, w - 2, 12, TFT_BLACK);

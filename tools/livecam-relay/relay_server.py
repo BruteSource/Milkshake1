@@ -11,9 +11,19 @@ resolves the stream (yt-dlp), downloads segments over HTTPS via `requests`
 local bytes to pull out JPEG frames. Those frames are served as a standard
 multipart MJPEG stream over plain HTTP (no TLS) on the LAN.
 
-On-demand: with 35 cameras, pulling all of them constantly would be
-wasteful. Each CameraSource only starts its background puller when a
-client requests it, and stops itself after IDLE_TIMEOUT_S with no viewers.
+On-demand: with 88 cameras, pulling all of them constantly would be
+wasteful. Each CameraSource only starts its background puller (segment
+fetch + ffmpeg extract) when a client requests it, and stops itself after
+IDLE_TIMEOUT_S with no viewers.
+
+Pre-warmed URLs: resolving a YouTube Live stream's signed HLS URL
+(`yt-dlp -g`) takes ~2s and was the single biggest cold-start cost --
+every grid cell that hadn't been viewed recently paid it on top of the
+segment fetch, and a 4-cell page did this serially. A lightweight
+background thread (`_url_warmer`) keeps every camera's URL pre-resolved
+on a rolling basis regardless of viewer activity (cheap: just a metadata
+call, no video pulled), so a cold viewer request only ever pays for the
+segment fetch + ffmpeg extract, not the resolve.
 
 Usage: python3 relay_server.py
 Then point the board at http://<this-host-LAN-IP>:8090/live/<id>.mjpg
@@ -33,8 +43,13 @@ from cameras import CAMERAS, CATEGORIES
 FFMPEG = str(Path.home() / ".local/bin/ffmpeg")
 YTDLP = str(Path.home() / ".local/bin/yt-dlp")
 PORT = 8090
-TARGET_FPS = 1  # frames extracted per second of source video
-IDLE_TIMEOUT_S = 30  # stop pulling a camera this long after its last viewer leaves
+TARGET_FPS = 2  # frames extracted per second of source video -- try bumping
+                 # this now that URL-warming cut latency; the real ceiling
+                 # if any is the ESP32's own JPEG decode+draw speed, not
+                 # this relay, so watch the device for lag/backlog before
+                 # pushing higher
+IDLE_TIMEOUT_S = 90  # stop pulling a camera this long after its last viewer leaves
+URL_REFRESH_S = 20 * 60  # re-resolve each camera's HLS URL this often (well under the ~6h signed-URL expiry)
 
 
 class CameraSource:
@@ -72,12 +87,15 @@ class CameraSource:
         url = out.stdout.strip().splitlines()[-1] if out.stdout.strip() else None
         if not url:
             raise RuntimeError(f"yt-dlp resolve failed: {out.stderr[-500:]}")
-        self._hls_url = url
-        self._hls_resolved_at = time.time()
+        with self.lock:
+            self._hls_url = url
+            self._hls_resolved_at = time.time()
 
     def _latest_segment_url(self):
-        if self._hls_url is None or time.time() - self._hls_resolved_at > 1800:
-            self._resolve_hls()
+        with self.lock:
+            stale = self._hls_url is None or time.time() - self._hls_resolved_at > URL_REFRESH_S
+        if stale:
+            self._resolve_hls()  # normally already warm -- see _url_warmer
 
         resp = requests.get(self._hls_url, timeout=10)
         resp.raise_for_status()
@@ -135,11 +153,29 @@ class CameraSource:
         with self.lock:
             self._running = False
             self.frame = None
-            self._hls_url = None  # force re-resolve next time (avoid stale expired urls)
+            # Deliberately NOT clearing _hls_url here -- _url_warmer keeps it
+            # fresh independently of viewer activity, so the next cold start
+            # only pays for the segment fetch, not a fresh yt-dlp resolve.
         print(f"[{self.cfg['id']}] idled out, stopped")
 
 
 SOURCES = {c["id"]: CameraSource(c) for c in CAMERAS}
+
+
+def _url_warmer():
+    """Keeps every camera's HLS URL resolved, regardless of viewer
+    activity, so a cold viewer request skips the ~2s yt-dlp resolve step.
+    Staggered (a few seconds between each) so a full pass doesn't fire ~90
+    yt-dlp processes at YouTube simultaneously; a full pass takes a few
+    minutes, well under URL_REFRESH_S."""
+    stagger_s = max(2.0, URL_REFRESH_S / max(len(SOURCES), 1) * 0.5)
+    while True:
+        for src in SOURCES.values():
+            try:
+                src._resolve_hls()
+            except Exception as e:
+                print(f"[warmer] {src.cfg['id']} resolve failed: {e}")
+            time.sleep(stagger_s)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -215,6 +251,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    threading.Thread(target=_url_warmer, daemon=True, name="url-warmer").start()
     server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
-    print(f"livecam-relay listening on :{PORT} ({len(SOURCES)} cameras, on-demand)")
+    print(f"livecam-relay listening on :{PORT} ({len(SOURCES)} cameras, on-demand, URL-warmed)")
     server.serve_forever()
