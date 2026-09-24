@@ -283,14 +283,29 @@ void drawLiveGridCell(int slot, int filteredIdx) {
     if (filteredIdx >= g_liveFilteredCount) return;
     livecams::Camera& cam = g_liveCams[g_liveFilteredIdx[filteredIdx]];
 
-    // Text-only for now -- per-cell JPEG thumbnails (livecams::fetchJpeg)
-    // were taking a very long time or failing outright while the relay's
-    // higher-bitrate format switch settles under load. Flip back to a
-    // drawJpg call here once that's confirmed stable.
-    lcd.fillRect(x + 1, y + 1, w - 2, h - 2, TFT_BLACK);
-    lcd.setTextSize(1);
-    lcd.setTextColor(TFT_WHITE, TFT_BLACK);
-    drawWrappedText(x + 1, y + 1, w - 2, h - 2, cam.title);
+    // The relay now caches each camera's last-served frame indefinitely
+    // (not just while a viewer is active -- see CameraSource._run()'s
+    // idle-stop in relay_server.py), so /live/<id>.jpg responds instantly
+    // with a (possibly slightly stale) cached thumbnail instead of
+    // blocking on a fresh pull, which is what made thumbnails too slow
+    // for grid browsing before.
+    uint8_t* buf = nullptr;
+    size_t len = 0;
+    if (livecams::fetchJpeg(cam.id, &buf, &len)) {
+        lcd.fillRect(x + 1, y + 1, w - 2, h - 2, TFT_BLACK);
+        lcd.drawJpg(buf, len, x + 1, y + 1, w - 2, h - 14, 0, 0, 0.0f, 0.0f, middle_center);
+        free(buf);
+        lcd.fillRect(x + 1, y + h - 13, w - 2, 12, TFT_BLACK);
+        lcd.setCursor(x + 3, y + h - 12);
+        lcd.setTextSize(1);
+        lcd.setTextColor(TFT_WHITE, TFT_BLACK);
+        lcd.print(cam.title);
+    } else {
+        lcd.fillRect(x + 1, y + 1, w - 2, h - 2, TFT_BLACK);
+        lcd.setTextSize(1);
+        lcd.setTextColor(TFT_WHITE, TFT_BLACK);
+        drawWrappedText(x + 1, y + 1, w - 2, h - 2, cam.title);
+    }
 }
 
 void drawLiveGrid() {

@@ -277,10 +277,12 @@ class CameraSource:
             writer.join(timeout=2)
         with self.lock:
             self._running = False
-            self.frame = None
-            # Deliberately NOT clearing _hls_url here -- _url_warmer keeps it
-            # fresh independently of viewer activity, so the next cold start
-            # only pays for the segment fetch, not a fresh yt-dlp resolve.
+            # Deliberately NOT clearing self.frame or _hls_url here -- the
+            # last frame stays cached so a grid thumbnail request always
+            # gets an instant response (possibly a bit stale) instead of
+            # blocking on a fresh pull every time the camera idles out
+            # between menu visits; _url_warmer keeps _hls_url fresh
+            # independently of viewer activity either way.
         print(f"[{self.cfg['id']}] idled out, stopped")
 
 
