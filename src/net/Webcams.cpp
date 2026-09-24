@@ -91,10 +91,12 @@ int fetchList(Webcam* out, int maxCount, const char* continentCode) {
         return 0;
     }
 
-    // icon first for the grid -- smallest size, fastest to fetch+decode
-    // when loading 4 thumbnails sequentially per page (PR #1 feedback:
-    // "thumbnail" made the grid visibly slow).
-    static const char* kThumbKeys[] = {"icon", "thumbnail", "preview"};
+    // "thumbnail" (200x112), not "icon" (48x48) -- icon looked bad upscaled
+    // in the grid cells, and didn't actually speed anything up: the per-page
+    // load lag is TLS handshake overhead (4 separate HTTPS connections),
+    // not image payload size (PR #1). Revisit with a reused connection or
+    // background prefetch if the lag needs fixing later.
+    static const char* kThumbKeys[] = {"thumbnail", "icon", "preview"};
     static const char* kPreviewKeys[] = {"preview", "thumbnail", "icon"};
 
     int count = 0;
