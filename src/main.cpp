@@ -1,8 +1,8 @@
-// CYD-Milkshake: browse public webcams (Windy Webcams API) and view a
-// periodically-refreshed snapshot on the display. Not true live video --
-// this hardware can't decode video streams, so "live" means re-fetching
-// the JPEG snapshot every few seconds, same as the source webcams
-// themselves typically update.
+// CYD-Milkshake: browse public webcams (Windy Webcams API) by region, in a
+// paginated thumbnail grid, and view a periodically-refreshed snapshot on
+// tap. Not true live video -- this hardware can't decode video streams, so
+// "live" means re-fetching the JPEG snapshot on an interval, matching how
+// the source webcams themselves typically update.
 #include <Arduino.h>
 
 #include "hw/Display.h"
@@ -16,33 +16,27 @@ namespace {
 
 LGFX lcd;
 
-constexpr int kMaxWebcams = 10;
+constexpr int kMaxWebcams = 40;
+constexpr int kPerPage = 4;
 webcams::Webcam g_webcams[kMaxWebcams];
 int g_webcamCount = 0;
+int g_page = 0;
 
-enum class Screen { List, Viewer };
-Screen g_screen = Screen::List;
+enum class Screen { Regions, Grid, Viewer };
+Screen g_screen = Screen::Regions;
 int g_selected = -1;
 
-constexpr int kRowHeight = 22;
+constexpr int kRegionRowHeight = 34;
+constexpr int kHeaderH = 16;
+constexpr int kFooterH = 20;
+constexpr int kGridTop = kHeaderH;
+constexpr int kGridBottom = OT_H - kFooterH;
+constexpr int kCellW = OT_W / 2;
+constexpr int kCellH = (kGridBottom - kGridTop) / 2;
 constexpr uint32_t kRefreshIntervalMs = 15000;
 uint32_t g_lastRefresh = 0;
 
-void drawList() {
-    lcd.fillScreen(TFT_BLACK);
-    lcd.setTextSize(1);
-    if (g_webcamCount == 0) {
-        lcd.setCursor(10, 10);
-        lcd.setTextColor(TFT_RED, TFT_BLACK);
-        lcd.println("no webcams loaded");
-        return;
-    }
-    for (int i = 0; i < g_webcamCount; i++) {
-        lcd.setCursor(6, 4 + i * kRowHeight);
-        lcd.setTextColor(TFT_WHITE, TFT_BLACK);
-        lcd.println(g_webcams[i].title);
-    }
-}
+int pageCount() { return (g_webcamCount + kPerPage - 1) / kPerPage; }
 
 void showError(const char* msg) {
     lcd.fillRect(0, OT_H - 20, OT_W, 20, TFT_BLACK);
@@ -52,11 +46,129 @@ void showError(const char* msg) {
     lcd.println(msg);
 }
 
+// --- Regions screen ---------------------------------------------------
+
+void drawRegions() {
+    lcd.fillScreen(TFT_BLACK);
+    lcd.setTextSize(1);
+    lcd.setTextColor(TFT_WHITE, TFT_BLACK);
+    lcd.setCursor(6, 2);
+    lcd.println("select a region");
+    for (int i = 0; i < webcams::kRegionCount; i++) {
+        int y = 16 + i * kRegionRowHeight;
+        lcd.drawFastHLine(0, y, OT_W, TFT_DARKGREY);
+        lcd.setCursor(10, y + 10);
+        lcd.setTextSize(2);
+        lcd.println(webcams::kRegions[i].name);
+    }
+}
+
+void enterRegions() {
+    g_screen = Screen::Regions;
+    g_webcamCount = 0;
+    drawRegions();
+}
+
+// --- Grid screen --------------------------------------------------------
+
+void cellRect(int slot, int* x, int* y, int* w, int* h) {
+    int col = slot % 2, row = slot / 2;
+    *x = col * kCellW;
+    *y = kGridTop + row * kCellH;
+    *w = kCellW;
+    *h = kCellH;
+}
+
+void drawGridChrome() {
+    lcd.fillScreen(TFT_BLACK);
+    lcd.drawFastHLine(0, kGridTop - 1, OT_W, TFT_DARKGREY);
+    lcd.drawFastVLine(kCellW, kGridTop, kGridBottom - kGridTop, TFT_DARKGREY);
+    lcd.drawFastHLine(0, kGridTop + kCellH, OT_W, TFT_DARKGREY);
+    lcd.drawFastHLine(0, kGridBottom, OT_W, TFT_DARKGREY);
+
+    lcd.setTextSize(1);
+    lcd.setTextColor(TFT_WHITE, TFT_BLACK);
+    lcd.setCursor(4, 2);
+    lcd.print("< regions");
+
+    char buf[16];
+    snprintf(buf, sizeof(buf), "page %d/%d", g_page + 1, pageCount());
+    lcd.setCursor(OT_W / 2 - 30, OT_H - kFooterH + 4);
+    lcd.print(buf);
+    lcd.setCursor(4, OT_H - kFooterH + 4);
+    lcd.print(g_page > 0 ? "< prev" : "");
+    lcd.setCursor(OT_W - 46, OT_H - kFooterH + 4);
+    lcd.print(g_page < pageCount() - 1 ? "next >" : "");
+}
+
+void drawGridCell(int slot, int idx) {
+    int x, y, w, h;
+    cellRect(slot, &x, &y, &w, &h);
+    if (idx >= g_webcamCount) return;
+
+    lcd.setCursor(x + 4, y + 4);
+    lcd.setTextSize(1);
+    lcd.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    lcd.print("loading...");
+
+    uint8_t* buf = nullptr;
+    size_t len = 0;
+    if (!http::getBuffered(g_webcams[idx].thumbUrl, nullptr, 0, &buf, &len)) {
+        lcd.fillRect(x + 1, y + 1, w - 2, h - 2, TFT_BLACK);
+        lcd.setCursor(x + 4, y + h / 2);
+        lcd.setTextColor(TFT_RED, TFT_BLACK);
+        lcd.print("fetch failed");
+        return;
+    }
+    lcd.fillRect(x + 1, y + 1, w - 2, h - 2, TFT_BLACK);
+    lcd.drawJpg(buf, len, x + 1, y + 1, w - 2, h - 14);
+    free(buf);
+
+    lcd.fillRect(x + 1, y + h - 13, w - 2, 12, TFT_BLACK);
+    lcd.setCursor(x + 3, y + h - 12);
+    lcd.setTextColor(TFT_WHITE, TFT_BLACK);
+    lcd.print(g_webcams[idx].title);
+}
+
+void drawGrid() {
+    drawGridChrome();
+    int base = g_page * kPerPage;
+    for (int slot = 0; slot < kPerPage; slot++) {
+        drawGridCell(slot, base + slot);
+    }
+}
+
+void enterGrid(int page) {
+    g_page = page;
+    g_screen = Screen::Grid;
+    drawGrid();
+}
+
+void selectRegion(int regionIdx) {
+    lcd.fillScreen(TFT_BLACK);
+    lcd.setCursor(10, 10);
+    lcd.setTextColor(TFT_WHITE, TFT_BLACK);
+    lcd.println("loading webcams...");
+    g_webcamCount = webcams::fetchList(g_webcams, kMaxWebcams, webcams::kRegions[regionIdx].code);
+    Serial.printf("loaded %d webcams for %s\n", g_webcamCount, webcams::kRegions[regionIdx].code);
+    if (g_webcamCount == 0) {
+        lcd.setCursor(10, 30);
+        lcd.setTextColor(TFT_RED, TFT_BLACK);
+        lcd.println("no webcams found");
+        delay(1500);
+        enterRegions();
+        return;
+    }
+    enterGrid(0);
+}
+
+// --- Viewer screen --------------------------------------------------------
+
 void loadAndShowImage(int idx) {
     if (idx < 0 || idx >= g_webcamCount) return;
     uint8_t* buf = nullptr;
     size_t len = 0;
-    if (!http::getBuffered(g_webcams[idx].imageUrl, nullptr, 0, &buf, &len)) {
+    if (!http::getBuffered(g_webcams[idx].previewUrl, nullptr, 0, &buf, &len)) {
         showError("image fetch failed");
         return;
     }
@@ -64,8 +176,6 @@ void loadAndShowImage(int idx) {
     lcd.drawJpg(buf, len, 0, 0, OT_W, OT_H);
     free(buf);
 
-    // Title label so tap-to-row accuracy is visually verifiable, not just
-    // "some image loaded".
     lcd.fillRect(0, OT_H - 14, OT_W, 14, TFT_BLACK);
     lcd.setCursor(2, OT_H - 12);
     lcd.setTextSize(1);
@@ -81,18 +191,8 @@ void enterViewer(int idx) {
     loadAndShowImage(idx);
 }
 
-void enterList() {
-    g_screen = Screen::List;
-    drawList();
-}
+// --- Touch calibration (unchanged) ---------------------------------------
 
-// Interactive 4-dot calibration. Draws a crosshair at each of 4 inset
-// points (avoids the unreliable true bezel edge), waits for a full
-// press-and-release on each, and uses the last raw sample seen before
-// release (finger is most stable right before lifting). Order: TL, TR,
-// BR, BL -- matches the manual PR #1 corner-tap pass this replaces.
-// Saves the result to NVS via touch::setCalibration() and reboots so the
-// new calibration is in effect from a clean boot.
 constexpr int kCalInset = 20;
 
 void drawCalDot(int x, int y) {
@@ -106,8 +206,6 @@ void drawCalDot(int x, int y) {
     lcd.drawCircle(x, y, 8, TFT_GREEN);
 }
 
-// Blocks until a full press-and-release, returns the last raw sample seen
-// while touched (just before release).
 void captureCalPoint(int16_t* outRx, int16_t* outRy) {
     int16_t lastRx = -1, lastRy = -1;
     bool sawTouch = false;
@@ -134,7 +232,7 @@ void runCalibration() {
 
     drawCalDot(x0, y0);
     captureCalPoint(&rxTL, &ryTL);
-    delay(300);  // debounce release before the next point
+    delay(300);
 
     drawCalDot(x1, y0);
     captureCalPoint(&rxTR, &ryTR);
@@ -194,9 +292,8 @@ void setup() {
     // Hold the physical BOOT button (GPIO0) for 2s once the app is running
     // to (re)run touch calibration -- checked continuously in loop(), not
     // here. GPIO0 held low across a reset instead makes the ROM bootloader
-    // enter UART download mode rather than running this app at all (that's
-    // how flashing mode is normally entered), so gating on it at cold boot
-    // would race against that; polling it mid-run avoids that entirely.
+    // enter UART download mode rather than running this app at all, so
+    // gating on it at cold boot would race against that.
     pinMode(0, INPUT_PULLUP);
 
     if (!wifi::connect()) {
@@ -206,12 +303,7 @@ void setup() {
         return;
     }
 
-    lcd.setCursor(10, 60);
-    lcd.println("loading webcams...");
-    g_webcamCount = webcams::fetchList(g_webcams, kMaxWebcams);
-    Serial.printf("loaded %d webcams\n", g_webcamCount);
-
-    enterList();
+    enterRegions();
 }
 
 void loop() {
@@ -229,11 +321,29 @@ void loop() {
     touch::Point p = touch::poll();
 
     if (p.pressed) {
-        if (g_screen == Screen::List) {
-            int row = p.y / kRowHeight;
-            if (row >= 0 && row < g_webcamCount) enterViewer(row);
-        } else {
-            enterList();
+        switch (g_screen) {
+            case Screen::Regions: {
+                int row = (p.y - 16) / kRegionRowHeight;
+                if (row >= 0 && row < webcams::kRegionCount) selectRegion(row);
+                break;
+            }
+            case Screen::Grid: {
+                if (p.y < kHeaderH) {
+                    enterRegions();
+                } else if (p.y >= kGridBottom) {
+                    if (p.x < OT_W / 3 && g_page > 0) enterGrid(g_page - 1);
+                    else if (p.x > 2 * OT_W / 3 && g_page < pageCount() - 1) enterGrid(g_page + 1);
+                } else {
+                    int col = p.x < kCellW ? 0 : 1;
+                    int row = p.y < kGridTop + kCellH ? 0 : 1;
+                    int idx = g_page * kPerPage + row * 2 + col;
+                    if (idx < g_webcamCount) enterViewer(idx);
+                }
+                break;
+            }
+            case Screen::Viewer:
+                enterGrid(g_page);
+                break;
         }
     }
 

@@ -9,6 +9,13 @@
 
 namespace webcams {
 
+const Region kRegions[] = {
+    {"NA", "North America"}, {"SA", "South America"}, {"EU", "Europe"},
+    {"AS", "Asia"},          {"AF", "Africa"},         {"OC", "Oceania"},
+    {"AN", "Antarctica"},
+};
+const int kRegionCount = sizeof(kRegions) / sizeof(kRegions[0]);
+
 namespace {
 
 struct SpiRamAllocator : ArduinoJson::Allocator {
@@ -17,13 +24,11 @@ struct SpiRamAllocator : ArduinoJson::Allocator {
     void* reallocate(void* p, size_t n) override { return heap_caps_realloc(p, n, MALLOC_CAP_SPIRAM); }
 };
 
-// Picks the best available snapshot URL out of whichever size keys exist
-// under images.current. Order is largest-useful-for-320x240 first.
-bool pickImageUrl(JsonObjectConst current, char* out, size_t outLen) {
-    static const char* kSizeKeys[] = {"preview", "thumbnail", "icon"};
-    for (const char* key : kSizeKeys) {
-        if (current[key].is<const char*>()) {
-            strlcpy(out, current[key], outLen);
+bool pickUrl(JsonObjectConst current, const char* const* keysInOrder, int keyCount,
+             char* out, size_t outLen) {
+    for (int i = 0; i < keyCount; i++) {
+        if (current[keysInOrder[i]].is<const char*>()) {
+            strlcpy(out, current[keysInOrder[i]], outLen);
             return true;
         }
     }
@@ -49,12 +54,14 @@ bool pickLatLon(JsonObjectConst cam, double* lat, double* lon) {
 
 }  // namespace
 
-int fetchList(Webcam* out, int maxCount) {
-    char url[128];
-    // include=images,location -- the default response omits both; without
-    // this every webcam has no usable image URL and gets skipped below.
+int fetchList(Webcam* out, int maxCount, const char* continentCode) {
+    char url[192];
+    // include=images,location -- confirmed required (PR #1). continents=
+    // param name/codes NOT verified against live docs -- flagging for the
+    // local session to confirm with one curl call.
     snprintf(url, sizeof(url),
-             "https://api.windy.com/webcams/api/v3/webcams?limit=%d&include=images,location", maxCount);
+             "https://api.windy.com/webcams/api/v3/webcams?limit=%d&include=images,location&continents=%s",
+             maxCount, continentCode);
 
     http::Header headers[] = {{"x-windy-api-key", WINDY_API_KEY}};
     uint8_t* buf = nullptr;
@@ -84,6 +91,9 @@ int fetchList(Webcam* out, int maxCount) {
         return 0;
     }
 
+    static const char* kThumbKeys[] = {"thumbnail", "icon", "preview"};
+    static const char* kPreviewKeys[] = {"preview", "thumbnail", "icon"};
+
     int count = 0;
     for (JsonObjectConst cam : arr) {
         if (count >= maxCount) break;
@@ -98,14 +108,15 @@ int fetchList(Webcam* out, int maxCount) {
         }
 
         JsonObjectConst images = cam["images"]["current"];
-        if (images.isNull() || !pickImageUrl(images, w.imageUrl, sizeof(w.imageUrl))) {
-            continue;  // skip webcams with no usable image URL
-        }
+        if (images.isNull()) continue;
+        bool haveThumb = pickUrl(images, kThumbKeys, 3, w.thumbUrl, sizeof(w.thumbUrl));
+        bool havePreview = pickUrl(images, kPreviewKeys, 3, w.previewUrl, sizeof(w.previewUrl));
+        if (!haveThumb || !havePreview) continue;  // skip webcams missing either size
 
         count++;
     }
 
-    Serial.printf("[webcams] parsed %d webcams\n", count);
+    Serial.printf("[webcams] parsed %d webcams for continent=%s\n", count, continentCode);
     return count;
 }
 
