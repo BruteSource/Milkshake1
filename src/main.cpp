@@ -33,6 +33,7 @@ int g_liveFilteredIdx[kMaxLiveCams];  // indices into g_liveCams matching the fi
 int g_liveFilteredCount = 0;
 mjpeg::Client g_mjpegClient;
 uint32_t g_lastMjpegFrame = 0;
+bool g_mjpegFirstFrameDrawn = false;
 
 // --- Power management -----------------------------------------------------
 // Soft sleep: dim the panel and pause network polling after 2 min idle,
@@ -333,6 +334,7 @@ void enterLiveViewer(int filteredIdx) {
     }
     g_screen = Screen::LiveViewer;
     g_lastMjpegFrame = millis();
+    g_mjpegFirstFrameDrawn = false;
 }
 
 void exitLiveViewer() {
@@ -568,6 +570,15 @@ void loop() {
                 // visible in what should always be the black title strip
                 // (most noticeable right when a stream connects/reconnects
                 // and the first frame lands).
+                if (!g_mjpegFirstFrameDrawn) {
+                    // Scale-to-fit centers the frame and can leave letterbox
+                    // bars (source aspect ratio vs. the viewer box's don't
+                    // always match) -- those bars are never touched by
+                    // drawJpg, so the "connecting..." text underneath them
+                    // would otherwise stay visible forever. Clear it once.
+                    lcd.fillScreen(TFT_BLACK);
+                    g_mjpegFirstFrameDrawn = true;
+                }
                 uint32_t t0 = micros();
                 lcd.drawJpg(buf, len, 0, 0, OT_W, OT_H - 14, 0, 0, 0.0f, 0.0f, middle_center);
                 uint32_t drawUs = micros() - t0;
