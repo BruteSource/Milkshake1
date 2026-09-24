@@ -47,6 +47,8 @@ CAMERAS = [
      "youtube_url": "https://www.youtube.com/watch?v=ypMu3yA7h3s", "format": "230/229"},
     {"id": "anan-forest-view", "category": "Bears", "title": "Anan Forest View",
      "youtube_url": "https://www.youtube.com/watch?v=RjrRz3t5kO4", "format": "230/229"},
+    {"id": "wolf-center", "category": "Bears", "title": "International Wolf Center",
+     "youtube_url": "https://www.youtube.com/watch?v=5e4lsEe4Vew", "format": "230/229"},
 
     # -- Africa (Masai Mara, Tembe, Africam network) --
     {"id": "tembe-elephant", "category": "Africa", "title": "Tembe Elephant Park",
@@ -246,10 +248,6 @@ CAMERAS = [
      "youtube_url": "https://www.youtube.com/watch?v=QF2ojZmSTWs", "format": "230/229"},
     {"id": "ecad-class", "category": "Kittens & Puppies", "title": "ECAD Puppy Training Class",
      "youtube_url": "https://www.youtube.com/watch?v=V5RfI6dXZgY", "format": "230/229"},
-
-    # -- More (miscellaneous wildlife that doesn't fit another category) --
-    {"id": "wolf-center", "category": "More", "title": "International Wolf Center",
-     "youtube_url": "https://www.youtube.com/watch?v=5e4lsEe4Vew", "format": "230/229"},
 ]
 
 CATEGORIES = sorted({c["category"] for c in CAMERAS})
