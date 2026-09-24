@@ -26,7 +26,7 @@ webcams::Webcam g_webcams[kMaxWebcams];
 int g_webcamCount = 0;
 int g_page = 0;
 
-constexpr int kMaxLiveCams = 40;
+constexpr int kMaxLiveCams = 100;
 livecams::Camera g_liveCams[kMaxLiveCams];
 int g_liveCamCount = 0;
 char g_liveCategories[8][24];

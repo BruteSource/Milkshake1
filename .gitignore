@@ -8,3 +8,4 @@
 compile_commands.json
 src/Secrets.h
 tools/livecam-relay/relay.log
+tools/livecam-relay/__pycache__/

@@ -1,12 +1,18 @@
-"""Roster of live cams: all officially operated by the explore.org nature
-cam network (or its named partners -- NPS Katmai, Africam, etc.), verified
-`is_live` at compile time via `yt-dlp --flat-playlist -j <channel>/streams`.
-No aggregator/scraped sources. Re-run tools/livecam-relay/discover.py to
-refresh -- streams do go offline/get replaced by the network periodically.
+"""Roster of live cams, all from officially-operated, intentionally-public
+sources -- no aggregator/scraped sources:
+  - explore.org nature cam network (+ named partners: NPS Katmai, Africam)
+  - Cornell Lab of Ornithology's bird cam network (allaboutbirds.org/cams)
+  - EarthCam's officially-operated landmark/city network (ad-supported --
+    see the "Scenic World" section below for what that means in practice)
+
+Verified `is_live` at compile time via
+`yt-dlp --flat-playlist -j <channel>/streams` against each network's
+YouTube channel(s) (listed per section below). Streams do go offline or
+get replaced over time -- re-run that command to refresh a stale section.
 
 format: youtube-dl format id for a ~240p video-only stream (see `yt-dlp -F
-<url>` per video; explore.org's channels consistently expose 229 =
-426x240 h264, close to this board's 320x240 panel).
+<url>` per video; every source here consistently exposes 229 = 426x240
+h264, close to this board's 320x240 panel).
 """
 
 CAMERAS = [
@@ -80,13 +86,130 @@ CAMERAS = [
     {"id": "catalina-marine", "category": "Ocean", "title": "USC Wrigley Catalina Marine Reserve",
      "youtube_url": "https://www.youtube.com/watch?v=JH_NzhSsqis", "format": "229"},
 
-    # -- Other --
-    {"id": "decorah-eagles", "category": "Birds & More", "title": "Decorah Eagles North Nest",
+    # -- Birds (Cornell Lab of Ornithology's official bird cam network --
+    # @CornellBirdCams, @CornellLabBirdCams-Channel2 -- plus explore.org's
+    # Decorah eagles) --
+    {"id": "decorah-eagles", "category": "Birds", "title": "Decorah Eagles North Nest",
      "youtube_url": "https://www.youtube.com/watch?v=GGIE1E-kaMQ", "format": "229"},
-    {"id": "wolf-center", "category": "Birds & More", "title": "International Wolf Center",
+    {"id": "cornell-royal-albatross", "category": "Birds", "title": "Royal Albatross Cam (NZ)",
+     "youtube_url": "https://www.youtube.com/watch?v=Mm_zVDDUeNA", "format": "229"},
+    {"id": "cornell-osprey", "category": "Birds", "title": "Hellgate Ospreys Nest",
+     "youtube_url": "https://www.youtube.com/watch?v=-qvYCbvbeN8", "format": "229"},
+    {"id": "cornell-hummingbird", "category": "Birds", "title": "Panama Hummingbird Feeder",
+     "youtube_url": "https://www.youtube.com/watch?v=0xFARCdZ3vA", "format": "229"},
+    {"id": "cornell-redtail-hawk", "category": "Birds", "title": "Cornell Red-tailed Hawks",
+     "youtube_url": "https://www.youtube.com/watch?v=afsaYKQ3vac", "format": "229"},
+    {"id": "cornell-feederwatch", "category": "Birds", "title": "Cornell FeederWatch Cam",
+     "youtube_url": "https://www.youtube.com/watch?v=x10vL6_47Dw", "format": "229"},
+    {"id": "cornell-panama-fruit", "category": "Birds", "title": "Panama Tropical Fruit Feeder",
+     "youtube_url": "https://www.youtube.com/watch?v=WtoxxHADnGk", "format": "229"},
+    {"id": "cornell-osprey-perch", "category": "Birds", "title": "Hellgate Ospreys Owl Pole",
+     "youtube_url": "https://www.youtube.com/watch?v=1UAB3IsxE4U", "format": "229"},
+    {"id": "cornell-hawk-fernow", "category": "Birds", "title": "Cornell Hawks Fernow Nest",
+     "youtube_url": "https://www.youtube.com/watch?v=jaNayeUXb2Y", "format": "229"},
+
+    # -- More (wolves, kittens) --
+    {"id": "wolf-center", "category": "More", "title": "International Wolf Center",
      "youtube_url": "https://www.youtube.com/watch?v=5e4lsEe4Vew", "format": "229"},
-    {"id": "kitten-rescue", "category": "Birds & More", "title": "Kitten Rescue Cat Cam",
+    {"id": "kitten-rescue", "category": "More", "title": "Kitten Rescue Cat Cam",
      "youtube_url": "https://www.youtube.com/watch?v=-m_nQT62B4Y", "format": "229"},
+
+    # -- Scenic World (EarthCam's officially-operated landmark/city network,
+    # @EarthCam, plus one SkylineWebcams single-location stream -- Venice --
+    # their other streams are multi-camera compilation mixes, not usable
+    # per-camera here. EarthCam is ad-supported, unlike the rest of this
+    # roster, so an occasional frame may show an ad instead of the live
+    # view; not filtered, low-effort to tolerate given the scale on offer.) --
+    {"id": "earthcam-giraffe-barn", "category": "Scenic World", "title": "Giraffe Cam Barn (Greenville, SC)",
+     "youtube_url": "https://www.youtube.com/watch?v=3nzuUOreQqI", "format": "229"},
+    {"id": "earthcam-giraffe-paddock", "category": "Scenic World", "title": "Giraffe Paddock (Greenville, SC)",
+     "youtube_url": "https://www.youtube.com/watch?v=T0SI9iz9yzE", "format": "229"},
+    {"id": "earthcam-salmon-fishing", "category": "Scenic World", "title": "Salmon Fishing River (Pulaski, NY)",
+     "youtube_url": "https://www.youtube.com/watch?v=1LKfIz99wBQ", "format": "229"},
+    {"id": "earthcam-cayman", "category": "Scenic World", "title": "Cayman Islands",
+     "youtube_url": "https://www.youtube.com/watch?v=Xw8CoRwNfXs", "format": "229"},
+    {"id": "earthcam-flight93", "category": "Scenic World", "title": "Flight 93 Memorial (Shanksville, PA)",
+     "youtube_url": "https://www.youtube.com/watch?v=OSI8qWMoK5E", "format": "229"},
+    {"id": "earthcam-lincoln-harbor", "category": "Scenic World", "title": "Lincoln Harbor (New York City)",
+     "youtube_url": "https://www.youtube.com/watch?v=sixP_dAJ8D4", "format": "229"},
+    {"id": "earthcam-statue-liberty", "category": "Scenic World", "title": "Statue of Liberty",
+     "youtube_url": "https://www.youtube.com/watch?v=o5Ie_LpZ9uk", "format": "229"},
+    {"id": "earthcam-911-memorial", "category": "Scenic World", "title": "9/11 Memorial & Museum",
+     "youtube_url": "https://www.youtube.com/watch?v=ZYQlLQHz2Mg", "format": "229"},
+    {"id": "earthcam-midway-airport", "category": "Scenic World", "title": "Midway Airport (Chicago, IL)",
+     "youtube_url": "https://www.youtube.com/watch?v=EiUyBIcG4fQ", "format": "229"},
+    {"id": "earthcam-anglins-pier", "category": "Scenic World", "title": "Anglins Pier (Lauderdale-By-The-Sea, FL)",
+     "youtube_url": "https://www.youtube.com/watch?v=tAdTOOsrZBQ", "format": "229"},
+    {"id": "earthcam-tamariu-spain", "category": "Scenic World", "title": "Tamariu, Spain",
+     "youtube_url": "https://www.youtube.com/watch?v=fTh5ssC1z-c", "format": "229"},
+    {"id": "earthcam-brooklyn-bridge", "category": "Scenic World", "title": "Brooklyn Bridge",
+     "youtube_url": "https://www.youtube.com/watch?v=tErYxn2UM5Y", "format": "229"},
+    {"id": "earthcam-abbey-road", "category": "Scenic World", "title": "Abbey Road Crossing (London)",
+     "youtube_url": "https://www.youtube.com/watch?v=zMCea32gpmg", "format": "229"},
+    {"id": "earthcam-madison-indiana", "category": "Scenic World", "title": "Madison, Indiana",
+     "youtube_url": "https://www.youtube.com/watch?v=Ez6xC43MMTQ", "format": "229"},
+    {"id": "earthcam-seaside-heights", "category": "Scenic World", "title": "Seaside Heights, NJ",
+     "youtube_url": "https://www.youtube.com/watch?v=OBgCrw-IyhE", "format": "229"},
+    {"id": "earthcam-mallorca-spain", "category": "Scenic World", "title": "Mallorca, Spain",
+     "youtube_url": "https://www.youtube.com/watch?v=jtdyLykT_XY", "format": "229"},
+    {"id": "earthcam-pigeon-river", "category": "Scenic World", "title": "Pigeon River (Hartford, TN)",
+     "youtube_url": "https://www.youtube.com/watch?v=6tq8S2pp8PQ", "format": "229"},
+    {"id": "earthcam-buffalo-monument", "category": "Scenic World", "title": "World's Largest Buffalo Monument (ND)",
+     "youtube_url": "https://www.youtube.com/watch?v=VWDi2Po3ZsQ", "format": "229"},
+    {"id": "earthcam-wildwoods", "category": "Scenic World", "title": "Wildwoods (Wildwood, NJ)",
+     "youtube_url": "https://www.youtube.com/watch?v=cK71xhMRtds", "format": "229"},
+    {"id": "earthcam-times-square", "category": "Scenic World", "title": "Times Square North 4K",
+     "youtube_url": "https://www.youtube.com/watch?v=JQ_jwk_7OVE", "format": "229"},
+    {"id": "earthcam-snowman-gaylord", "category": "Scenic World", "title": "Snowman Cam (Gaylord, MI)",
+     "youtube_url": "https://www.youtube.com/watch?v=IU_-Pl9O5jQ", "format": "229"},
+    {"id": "earthcam-liberty-bell", "category": "Scenic World", "title": "Liberty Bell (Philadelphia, PA)",
+     "youtube_url": "https://www.youtube.com/watch?v=F1EQEDL4ddU", "format": "229"},
+    {"id": "earthcam-philadelphia", "category": "Scenic World", "title": "Philadelphia, PA",
+     "youtube_url": "https://www.youtube.com/watch?v=9mMnqO1UuIU", "format": "229"},
+    {"id": "earthcam-council-bluffs", "category": "Scenic World", "title": "Council Bluffs, Iowa",
+     "youtube_url": "https://www.youtube.com/watch?v=qsrevo5Vdkw", "format": "229"},
+    {"id": "earthcam-sanibel-island", "category": "Scenic World", "title": "Sanibel Island",
+     "youtube_url": "https://www.youtube.com/watch?v=4LTSTw4jnZc", "format": "229"},
+    {"id": "earthcam-world-trade-center", "category": "Scenic World", "title": "World Trade Center (New York City)",
+     "youtube_url": "https://www.youtube.com/watch?v=5C9oM7C2Q9k", "format": "229"},
+    {"id": "earthcam-baltimore-aquarium", "category": "Scenic World", "title": "Aquarium Cam (Baltimore, MD)",
+     "youtube_url": "https://www.youtube.com/watch?v=KSxc-N67TU4", "format": "229"},
+    {"id": "earthcam-washington-monument", "category": "Scenic World", "title": "Washington Monument (DC)",
+     "youtube_url": "https://www.youtube.com/watch?v=oDCAAfOSqvA", "format": "229"},
+    {"id": "earthcam-roswell-nm", "category": "Scenic World", "title": "Roswell, New Mexico",
+     "youtube_url": "https://www.youtube.com/watch?v=kLoFxVhRWtQ", "format": "229"},
+    {"id": "earthcam-ruidoso-nm", "category": "Scenic World", "title": "Ruidoso, New Mexico",
+     "youtube_url": "https://www.youtube.com/watch?v=XoANQufSSXY", "format": "229"},
+    {"id": "earthcam-milwaukee", "category": "Scenic World", "title": "Milwaukee, WI",
+     "youtube_url": "https://www.youtube.com/watch?v=MT5Og9gOKuM", "format": "229"},
+    {"id": "earthcam-chicago-skydeck", "category": "Scenic World", "title": "Chicago Skydeck Cam",
+     "youtube_url": "https://www.youtube.com/watch?v=O0UGT7AT3aw", "format": "229"},
+    {"id": "earthcam-terminal-tower", "category": "Scenic World", "title": "Terminal Tower (Cleveland, OH)",
+     "youtube_url": "https://www.youtube.com/watch?v=iHqqkh_Lths", "format": "229"},
+    {"id": "earthcam-coney-island", "category": "Scenic World", "title": "Coney Island (New York City)",
+     "youtube_url": "https://www.youtube.com/watch?v=H67j7H-7QD0", "format": "229"},
+    {"id": "earthcam-niagara-falls", "category": "Scenic World", "title": "Niagara Falls",
+     "youtube_url": "https://www.youtube.com/watch?v=qx7gry390YA", "format": "229"},
+    {"id": "earthcam-sitka-alaska", "category": "Scenic World", "title": "Sitka, Alaska",
+     "youtube_url": "https://www.youtube.com/watch?v=sF5hFDGN20Y", "format": "229"},
+    {"id": "earthcam-allegiant-stadium", "category": "Scenic World", "title": "Allegiant Stadium (Las Vegas, NV)",
+     "youtube_url": "https://www.youtube.com/watch?v=_rmUXOHSf0w", "format": "229"},
+    {"id": "earthcam-scrub-island", "category": "Scenic World", "title": "Scrub Island (British Virgin Islands)",
+     "youtube_url": "https://www.youtube.com/watch?v=t55kv94nEzc", "format": "229"},
+    {"id": "earthcam-bellagio", "category": "Scenic World", "title": "Bellagio Conservatory (Las Vegas, NV)",
+     "youtube_url": "https://www.youtube.com/watch?v=KJuGU7v5oYw", "format": "229"},
+    {"id": "earthcam-kansas-city", "category": "Scenic World", "title": "Kansas City Cam (Kansas City, MO)",
+     "youtube_url": "https://www.youtube.com/watch?v=9fzUjSTK5F8", "format": "229"},
+    {"id": "earthcam-summit-vanderbilt", "category": "Scenic World", "title": "SUMMIT One Vanderbilt (New York City)",
+     "youtube_url": "https://www.youtube.com/watch?v=2_PDaUJbfuI", "format": "229"},
+    {"id": "earthcam-scottsville-ky", "category": "Scenic World", "title": "Scottsville Main Street, Kentucky",
+     "youtube_url": "https://www.youtube.com/watch?v=MsiHVaomJ04", "format": "229"},
+    {"id": "earthcam-western-wall", "category": "Scenic World", "title": "Western Wall (Jerusalem, Israel)",
+     "youtube_url": "https://www.youtube.com/watch?v=77akujLn4k8", "format": "229"},
+    {"id": "earthcam-dublin-ireland", "category": "Scenic World", "title": "Dublin, Ireland",
+     "youtube_url": "https://www.youtube.com/watch?v=3nyPER2kzqk", "format": "229"},
+    {"id": "earthcam-venice-rialto", "category": "Scenic World", "title": "Venice, Rialto Bridge",
+     "youtube_url": "https://www.youtube.com/watch?v=x4AlaibltlA", "format": "229"},
 ]
 
 CATEGORIES = sorted({c["category"] for c in CAMERAS})
