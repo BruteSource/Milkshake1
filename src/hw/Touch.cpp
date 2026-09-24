@@ -1,6 +1,7 @@
 #include "Touch.h"
 #include <Arduino.h>
 #include <Wire.h>
+#include <Preferences.h>
 
 #include "Display.h"  // OT_W, OT_H
 
@@ -11,11 +12,16 @@ constexpr int PIN_SCL = 15;
 constexpr int PIN_RST = 18;
 constexpr int PIN_INT = 17;
 
-// Measured on this specific unit via 4-corner tap (PR #1, commit 9b31b41
-// discussion). Screen X is driven by native Y span 289..8 (inverted --
-// map() handles that fine); screen Y by native X span 10..227.
-constexpr int16_t CAL_SX_AT_LEFT = 289, CAL_SX_AT_RIGHT = 8;
-constexpr int16_t CAL_SY_AT_TOP = 10, CAL_SY_AT_BOTTOM = 227;
+// Defaults measured on this specific unit via 4-corner tap (PR #1, commit
+// 9b31b41 discussion). Screen X is driven by native Y span 289..8
+// (inverted -- map() handles that fine); screen Y by native X span 10..227.
+// Overridden at boot by whatever's saved in NVS via setCalibration()/the
+// on-device dot calibration routine, if any.
+constexpr int16_t kDefaultSxLeft = 289, kDefaultSxRight = 8;
+constexpr int16_t kDefaultSyTop = 10, kDefaultSyBottom = 227;
+
+int16_t s_calSxLeft = kDefaultSxLeft, s_calSxRight = kDefaultSxRight;
+int16_t s_calSyTop = kDefaultSyTop, s_calSyBottom = kDefaultSyBottom;
 
 bool s_down = false;
 int16_t s_x0 = 0, s_y0 = 0;
@@ -46,10 +52,37 @@ void begin() {
     Wire.write(0xA4);
     Wire.write(0x00);
     Wire.endTransmission();
+
+    Preferences prefs;
+    if (prefs.begin("touchcal", /*readOnly=*/true)) {
+        if (prefs.isKey("sxL")) {
+            s_calSxLeft = prefs.getShort("sxL", kDefaultSxLeft);
+            s_calSxRight = prefs.getShort("sxR", kDefaultSxRight);
+            s_calSyTop = prefs.getShort("syT", kDefaultSyTop);
+            s_calSyBottom = prefs.getShort("syB", kDefaultSyBottom);
+        }
+        prefs.end();
+    }
 }
 
 bool isTouched() {
     return digitalRead(PIN_INT) == LOW;
+}
+
+void setCalibration(int16_t sxAtLeft, int16_t sxAtRight, int16_t syAtTop, int16_t syAtBottom) {
+    s_calSxLeft = sxAtLeft;
+    s_calSxRight = sxAtRight;
+    s_calSyTop = syAtTop;
+    s_calSyBottom = syAtBottom;
+
+    Preferences prefs;
+    if (prefs.begin("touchcal", /*readOnly=*/false)) {
+        prefs.putShort("sxL", sxAtLeft);
+        prefs.putShort("sxR", sxAtRight);
+        prefs.putShort("syT", syAtTop);
+        prefs.putShort("syB", syAtBottom);
+        prefs.end();
+    }
 }
 
 namespace {
@@ -116,8 +149,8 @@ bool readPoint(int16_t* sx, int16_t* sy) {
     int16_t rx, ry;
     if (!rawSample(&rx, &ry)) return false;
 
-    long x = map(ry, CAL_SX_AT_LEFT, CAL_SX_AT_RIGHT, 0, OT_W);
-    long y = map(rx, CAL_SY_AT_TOP, CAL_SY_AT_BOTTOM, 0, OT_H);
+    long x = map(ry, s_calSxLeft, s_calSxRight, 0, OT_W);
+    long y = map(rx, s_calSyTop, s_calSyBottom, 0, OT_H);
 
     // Edge nudge on the long (X) axis only, per the reference project.
     if (x < 48)             x -= (48 - x) / 4;

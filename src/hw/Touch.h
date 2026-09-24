@@ -23,6 +23,12 @@ Point poll();
 // "Finger down right now?" -- cheap check, no I2C read of coordinates.
 bool isTouched();
 
+// Overrides the built-in calibration constants and persists them to NVS,
+// so they survive reflashes/reboots. Values are raw-sensor readings at each
+// screen edge (see readPoint()'s map() calls in Touch.cpp for which axis
+// drives which). Call begin() first.
+void setCalibration(int16_t sxAtLeft, int16_t sxAtRight, int16_t syAtTop, int16_t syAtBottom);
+
 // I2C bus scan, chip id/vendor id/G_MODE registers, and a 2s at-rest sample
 // of raw TD_STATUS (touch point count) to tell a noisy/misconfigured sensor
 // apart from a corrupted I2C read. Prints to Serial.
