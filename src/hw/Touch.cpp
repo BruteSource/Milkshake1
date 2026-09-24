@@ -2,12 +2,26 @@
 #include <Arduino.h>
 #include <Wire.h>
 
+#include "Display.h"  // OT_W, OT_H
+
 namespace {
 constexpr uint8_t FT_ADDR = 0x38;
 constexpr int PIN_SDA = 16;
 constexpr int PIN_SCL = 15;
 constexpr int PIN_RST = 18;
 constexpr int PIN_INT = 17;
+
+// Reference project's proven default for rotation 1, unmeasured on this
+// specific unit -- see PR #1 for the real corner-tap calibration pending.
+// Screen X is driven by native Y span 16..306; screen Y by native X span
+// 20..230.
+constexpr int16_t CAL_SX_AT_LEFT = 16, CAL_SX_AT_RIGHT = 306;
+constexpr int16_t CAL_SY_AT_TOP = 20, CAL_SY_AT_BOTTOM = 230;
+
+bool s_down = false;
+int16_t s_x0 = 0, s_y0 = 0;
+int s_maxMove = 0;
+uint32_t s_downMs = 0;
 }  // namespace
 
 namespace touch {
@@ -96,6 +110,55 @@ bool rawSample(int16_t* rx, int16_t* ry) {
     *rx = (int16_t)x;
     *ry = (int16_t)y;
     return true;
+}
+
+namespace {
+bool readPoint(int16_t* sx, int16_t* sy) {
+    int16_t rx, ry;
+    if (!rawSample(&rx, &ry)) return false;
+
+    long x = map(ry, CAL_SX_AT_LEFT, CAL_SX_AT_RIGHT, 0, OT_W);
+    long y = map(rx, CAL_SY_AT_TOP, CAL_SY_AT_BOTTOM, 0, OT_H);
+
+    // Edge nudge on the long (X) axis only, per the reference project.
+    if (x < 48)             x -= (48 - x) / 4;
+    else if (x > OT_W - 49) x += (x - (OT_W - 49)) / 4;
+
+    *sx = (int16_t)constrain(x, 0, OT_W - 1);
+    *sy = (int16_t)constrain(y, 0, OT_H - 1);
+    return true;
+}
+}  // namespace
+
+Point poll() {
+    Point e{s_x0, s_y0, false, false};
+    int16_t x, y;
+    const bool touching = readPoint(&x, &y);
+    const uint32_t now = millis();
+
+    if (touching) {
+        e.down = true;
+        e.x = x;
+        e.y = y;
+        if (!s_down) {
+            s_down = true;
+            s_x0 = x;
+            s_y0 = y;
+            s_maxMove = 0;
+            s_downMs = now;
+        } else {
+            int dist = abs(x - s_x0) + abs(y - s_y0);
+            if (dist > s_maxMove) s_maxMove = dist;
+        }
+    } else if (s_down) {
+        s_down = false;
+        if (s_maxMove < 24 && now - s_downMs < 700) {
+            e.pressed = true;
+            e.x = s_x0;
+            e.y = s_y0;
+        }
+    }
+    return e;
 }
 
 }  // namespace touch

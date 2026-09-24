@@ -13,6 +13,13 @@ void begin();
 // garbage 0x0FFF sample.
 bool rawSample(int16_t* rx, int16_t* ry);
 
+// Debounced screen-space touch, using the reference project's proven
+// default calibration for OT_ROTATION (not yet the real per-unit
+// calibration -- see PR #1 for the pending corner-tap results). `pressed`
+// is true for one poll on a short, stationary tap's release.
+struct Point { int16_t x, y; bool down; bool pressed; };
+Point poll();
+
 // "Finger down right now?" -- cheap check, no I2C read of coordinates.
 bool isTouched();
 
