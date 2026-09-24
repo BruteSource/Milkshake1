@@ -131,22 +131,60 @@ class CameraSource:
         with self.lock:
             return time.time() - self._last_touch > IDLE_TIMEOUT_S
 
-    def _run(self):
-        print(f"[{self.cfg['id']}] starting")
-        while not self._idle_too_long():
+    def _fetch_next_segment(self, deadline):
+        """Poll for a new HLS segment and fetch it, retrying until one
+        appears (the playlist doesn't roll over instantly) or deadline."""
+        while time.time() < deadline and not self._idle_too_long():
             try:
                 seg_url = self._latest_segment_url()
-                if seg_url is None:
-                    time.sleep(2)
+                if seg_url is not None:
+                    resp = requests.get(seg_url, timeout=10)
+                    resp.raise_for_status()
+                    return resp.content
+            except Exception as e:
+                print(f"[{self.cfg['id']}] segment fetch error: {e}")
+            time.sleep(1)
+        return None
+
+    def _run(self):
+        # Fetch+decode of each ~5-6s HLS segment was happening after all of
+        # the previous segment's frames were published, so playback stalled
+        # for a beat every segment boundary (~every 6-10 frames at 2fps).
+        # Fix: prefetch the next segment on a background thread while the
+        # current segment's frames are still being paced out, so the fetch
+        # overlaps with playback instead of blocking it.
+        print(f"[{self.cfg['id']}] starting")
+        next_bytes = None
+        while not self._idle_too_long():
+            try:
+                if next_bytes is not None:
+                    seg_bytes = next_bytes
+                    next_bytes = None
+                else:
+                    seg_bytes = self._fetch_next_segment(time.time() + 10)
+                    if seg_bytes is None:
+                        continue
+
+                frames = self._extract_frames(seg_bytes)
+                if not frames:
                     continue
-                seg_resp = requests.get(seg_url, timeout=10)
-                seg_resp.raise_for_status()
-                frames = self._extract_frames(seg_resp.content)
+
+                prefetch = {}
+                publish_span = len(frames) / TARGET_FPS
+                t = threading.Thread(
+                    target=lambda: prefetch.__setitem__(
+                        "bytes", self._fetch_next_segment(time.time() + publish_span + 5)),
+                    daemon=True, name=f"cam-{self.cfg['id']}-prefetch")
+                t.start()
+
                 for f in frames:
                     self._publish(f)
                     time.sleep(1.0 / TARGET_FPS)
                     if self._idle_too_long():
                         break
+
+                t.join(timeout=5)
+                next_bytes = prefetch.get("bytes")
             except Exception as e:
                 print(f"[{self.cfg['id']}] error: {e}")
                 time.sleep(5)
