@@ -43,11 +43,13 @@ from cameras import CAMERAS, CATEGORIES
 FFMPEG = str(Path.home() / ".local/bin/ffmpeg")
 YTDLP = str(Path.home() / ".local/bin/yt-dlp")
 PORT = 8090
-TARGET_FPS = 2  # frames extracted per second of source video -- try bumping
-                 # this now that URL-warming cut latency; the real ceiling
-                 # if any is the ESP32's own JPEG decode+draw speed, not
-                 # this relay, so watch the device for lag/backlog before
-                 # pushing higher
+TARGET_FPS = 6  # frames extracted per second of source video. History
+                 # (2026-09-24): 2 -> 4 -> 8 to probe device headroom, but
+                 # switching to the 230/229 (640x360) format for quality
+                 # (see cameras.py) made on-device drawJpg+scale-to-fit
+                 # jump to ~120ms/frame -- 96% of the 125ms budget at 8fps,
+                 # no real headroom left. Backed off to 6fps (167ms budget)
+                 # to restore margin.
 IDLE_TIMEOUT_S = 90  # stop pulling a camera this long after its last viewer leaves
 URL_REFRESH_S = 20 * 60  # re-resolve each camera's HLS URL this often (well under the ~6h signed-URL expiry)
 
@@ -110,17 +112,6 @@ class CameraSource:
         self._last_seg_seq = seq
         return seg_url
 
-    def _extract_frames(self, ts_bytes):
-        proc = subprocess.run(
-            [FFMPEG, "-y", "-loglevel", "error", "-i", "pipe:0",
-             "-vf", f"fps={TARGET_FPS}", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1"],
-            input=ts_bytes, capture_output=True, timeout=20,
-        )
-        data = proc.stdout
-        starts = [m.start() for m in re.finditer(b"\xff\xd8\xff", data)]
-        return [data[s:(starts[i + 1] if i + 1 < len(starts) else len(data))]
-                for i, s in enumerate(starts)]
-
     def _publish(self, jpeg_bytes):
         with self.lock:
             self.frame = jpeg_bytes
@@ -146,48 +137,93 @@ class CameraSource:
             time.sleep(1)
         return None
 
-    def _run(self):
-        # Fetch+decode of each ~5-6s HLS segment was happening after all of
-        # the previous segment's frames were published, so playback stalled
-        # for a beat every segment boundary (~every 6-10 frames at 2fps).
-        # Fix: prefetch the next segment on a background thread while the
-        # current segment's frames are still being paced out, so the fetch
-        # overlaps with playback instead of blocking it.
-        print(f"[{self.cfg['id']}] starting")
-        next_bytes = None
-        while not self._idle_too_long():
-            try:
-                if next_bytes is not None:
-                    seg_bytes = next_bytes
-                    next_bytes = None
-                else:
-                    seg_bytes = self._fetch_next_segment(time.time() + 10)
-                    if seg_bytes is None:
-                        continue
-
-                frames = self._extract_frames(seg_bytes)
-                if not frames:
+    def _writer_loop(self, proc):
+        """Feeds HLS segment bytes into the persistent ffmpeg process's
+        stdin as they become available, back to back, so the decoder sees
+        one continuous stream instead of isolated per-segment inputs."""
+        try:
+            while not self._idle_too_long():
+                seg_bytes = self._fetch_next_segment(time.time() + 10)
+                if seg_bytes is None:
                     continue
+                proc.stdin.write(seg_bytes)
+                proc.stdin.flush()
+        except (BrokenPipeError, OSError):
+            pass
+        except Exception as e:
+            print(f"[{self.cfg['id']}] writer error: {e}")
+        finally:
+            try:
+                proc.stdin.close()
+            except Exception:
+                pass
 
-                prefetch = {}
-                publish_span = len(frames) / TARGET_FPS
-                t = threading.Thread(
-                    target=lambda: prefetch.__setitem__(
-                        "bytes", self._fetch_next_segment(time.time() + publish_span + 5)),
-                    daemon=True, name=f"cam-{self.cfg['id']}-prefetch")
-                t.start()
+    def _reader_loop(self, proc):
+        """Reads ffmpeg's continuous MJPEG stdout, splits it into
+        individual JPEG frames on SOI markers, and paces publishing to
+        TARGET_FPS regardless of how bursty ffmpeg's own output is."""
+        buf = b""
+        next_publish = time.time()
+        interval = 1.0 / TARGET_FPS
+        while not self._idle_too_long():
+            chunk = proc.stdout.read(4096)
+            if not chunk:
+                break
+            buf += chunk
+            starts = [m.start() for m in re.finditer(b"\xff\xd8\xff", buf)]
+            while len(starts) >= 2:
+                frame = buf[starts[0]:starts[1]]
+                now = time.time()
+                if next_publish > now:
+                    time.sleep(next_publish - now)
+                self._publish(frame)
+                next_publish = max(next_publish + interval, time.time() - interval)
+                starts.pop(0)
+                if self._idle_too_long():
+                    return
+            if starts:
+                buf = buf[starts[0]:]
+            else:
+                buf = b""
 
-                for f in frames:
-                    self._publish(f)
-                    time.sleep(1.0 / TARGET_FPS)
-                    if self._idle_too_long():
-                        break
-
-                t.join(timeout=5)
-                next_bytes = prefetch.get("bytes")
-            except Exception as e:
-                print(f"[{self.cfg['id']}] error: {e}")
-                time.sleep(5)
+    def _run(self):
+        # A fresh, isolated ffmpeg process per HLS segment (the old design)
+        # has no reference frames from before the segment, so if a segment
+        # doesn't start exactly on a keyframe, the frames right after it
+        # decode with visible corruption until the codec self-corrects --
+        # invisible at low sampling rates but very visible once TARGET_FPS
+        # was raised, since denser sampling hits that corrupted stretch far
+        # more often ("clear for a frame or two, then bad pixelation").
+        # Fix: one persistent ffmpeg decoder per camera, fed segments back
+        # to back on a writer thread, so it keeps proper frame references
+        # across segment boundaries. A separate reader thread paces
+        # publishing to TARGET_FPS independent of ffmpeg's own burstiness,
+        # which also keeps segment fetch+decode overlapping with playback
+        # (the earlier prefetch-thread fix is now subsumed by this).
+        print(f"[{self.cfg['id']}] starting")
+        proc = subprocess.Popen(
+            [FFMPEG, "-loglevel", "error", "-i", "pipe:0",
+             "-vf", f"fps={TARGET_FPS}", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1"],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+        )
+        writer = threading.Thread(target=self._writer_loop, args=(proc,), daemon=True,
+                                   name=f"cam-{self.cfg['id']}-writer")
+        writer.start()
+        try:
+            self._reader_loop(proc)
+        except Exception as e:
+            print(f"[{self.cfg['id']}] reader error: {e}")
+        finally:
+            try:
+                proc.stdin.close()
+            except Exception:
+                pass
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
+            writer.join(timeout=2)
         with self.lock:
             self._running = False
             self.frame = None
