@@ -235,24 +235,59 @@ CAMERAS = [
     {"id": "earthcam-venice-rialto", "category": "Scenic World", "title": "Venice, Rialto Bridge",
      "youtube_url": "https://www.youtube.com/watch?v=x4AlaibltlA", "format": "230/229"},
 
-    # -- Pacific Northwest (Seattle Aquarium, University of Washington, a
-    # Pierce County govt cam, and an individually-operated PDX/Mt. Hood
-    # cam). The Space Needle entry comes from an individual streamer
-    # (spaceneedlelive) who restarts a new video id per notable event
-    # rather than running one persistent stream -- if it goes stale,
-    # re-check that channel's /streams for the current one. --
-    {"id": "seattle-aquarium-otters", "category": "Scenic World", "title": "Seattle Aquarium Sea Otters",
-     "youtube_url": "https://www.youtube.com/watch?v=NqOmHpwMUxs", "format": "230/229"},
-    {"id": "seattle-space-needle", "category": "Scenic World", "title": "Space Needle (Seattle, WA)",
-     "youtube_url": "https://www.youtube.com/watch?v=3fw5b2zLYEc", "format": "230/229"},
-    {"id": "uw-seattle-campus", "category": "Scenic World", "title": "University of Washington Campus",
-     "youtube_url": "https://www.youtube.com/watch?v=4cgSE12k9Sc", "format": "230/229"},
-    {"id": "tacoma-pierce-county", "category": "Scenic World", "title": "Tacoma Skyline & Thea Foss Waterway",
-     "youtube_url": "https://www.youtube.com/watch?v=JkgfWXFz1N4", "format": "230/229"},
-    {"id": "portland-pdx-mt-hood", "category": "Scenic World", "title": "Portland, OR (PDX & Mt. Hood)",
-     "youtube_url": "https://www.youtube.com/watch?v=VaZn-A4fwNg", "format": "230/229"},
+]
 
-    # -- Kittens & Puppies (explore.org's Kitten Rescue LA + partner service-dog orgs) --
+# -- PNW (Seattle/Tacoma/Portland + Oregon & Washington coast. Mix of
+# officially-operated (KGW/KOIN news, Pierce County govt, Port of Friday
+# Harbor, Museum of Glass, Washington's Evergreen Coast tourism bureau,
+# Necanicum Watershed Council) and individually-operated-but-
+# intentionally-public sources (Westport WA cam, Long Beach eagle cam,
+# PDX/Mt. Hood cam, Space Needle cam) -- same sourcing bar as the rest of
+# the roster. The Space Needle entry comes from an individual streamer
+# (spaceneedlelive) who restarts a new video id per notable event rather
+# than running one persistent stream -- if it goes stale, re-check that
+# channel's /streams for the current one. --
+PNW_CAMERAS = [
+    {"id": "seattle-aquarium-otters", "category": "PNW", "title": "Seattle Aquarium Sea Otters",
+     "youtube_url": "https://www.youtube.com/watch?v=NqOmHpwMUxs", "format": "230/229"},
+    {"id": "seattle-space-needle", "category": "PNW", "title": "Space Needle (Seattle, WA)",
+     "youtube_url": "https://www.youtube.com/watch?v=3fw5b2zLYEc", "format": "230/229"},
+    {"id": "uw-seattle-campus", "category": "PNW", "title": "University of Washington Campus",
+     "youtube_url": "https://www.youtube.com/watch?v=4cgSE12k9Sc", "format": "230/229"},
+    {"id": "tacoma-pierce-county", "category": "PNW", "title": "Tacoma Skyline & Thea Foss Waterway",
+     "youtube_url": "https://www.youtube.com/watch?v=JkgfWXFz1N4", "format": "230/229"},
+    {"id": "tacoma-museum-glass", "category": "PNW", "title": "Tacoma Museum of Glass Hot Shop",
+     "youtube_url": "https://www.youtube.com/watch?v=qqWaK_DMpE4", "format": "230/229"},
+    {"id": "portland-pdx-mt-hood", "category": "PNW", "title": "Portland, OR (PDX & Mt. Hood)",
+     "youtube_url": "https://www.youtube.com/watch?v=VaZn-A4fwNg", "format": "230/229"},
+    {"id": "cannon-beach-kgw", "category": "PNW", "title": "Cannon Beach, OR (Haystack Rock)",
+     "youtube_url": "https://www.youtube.com/watch?v=XPQJRTHiZUY", "format": "230/229"},
+    {"id": "seaside-koin", "category": "PNW", "title": "Seaside, OR",
+     "youtube_url": "https://www.youtube.com/watch?v=Ce_vAKq1kUA", "format": "230/229"},
+    {"id": "seaside-osprey", "category": "PNW", "title": "Seaside Osprey Cam (Necanicum River, OR)",
+     "youtube_url": "https://www.youtube.com/watch?v=obN4dLWd3o0", "format": "230/229"},
+    {"id": "westport-wa", "category": "PNW", "title": "Westport, WA",
+     "youtube_url": "https://www.youtube.com/watch?v=w0a2ny0ZRwE", "format": "230/229"},
+    {"id": "long-beach-wa", "category": "PNW", "title": "Long Beach, WA",
+     "youtube_url": "https://www.youtube.com/watch?v=hJMiqJTQ3BY", "format": "230/229"},
+    {"id": "long-beach-eagle", "category": "PNW", "title": "Long Beach, WA Eagle Cam",
+     "youtube_url": "https://www.youtube.com/watch?v=PYbr-gMuOh0", "format": "230/229"},
+    {"id": "friday-harbor", "category": "PNW", "title": "Port of Friday Harbor (San Juan Islands, WA)",
+     "youtube_url": "https://www.youtube.com/watch?v=pr2p_uvmXh8", "format": "230/229"},
+    # Not YouTube -- this one's hosted on IPCamLive. Found via the embed on
+    # thesquarepdx.org/see-the-square-live/: its iframe points at
+    # g1.ipcamlive.com/player/player.php?alias=thesquarelive, whose page
+    # source gives the backing media server (s60.ipcamlive.com) and
+    # streamid; IPCamLive serves HLS at a predictable
+    # https://<server>/streams/<streamid>/stream.m3u8 path. Static URL, no
+    # yt-dlp/expiry involved -- see relay_server.py's "hls_url" cfg key.
+    {"id": "portland-pioneer-square", "category": "PNW", "title": "Pioneer Courthouse Square (Portland, OR)",
+     "hls_url": "https://s60.ipcamlive.com/streams/3c7igfub1y2owpmfs/stream.m3u8"},
+]
+CAMERAS += PNW_CAMERAS
+
+# -- Kittens & Puppies (explore.org's Kitten Rescue LA + partner service-dog orgs) --
+CAMERAS += [
     {"id": "kitten-rescue-cam", "category": "Kittens & Puppies", "title": "Kitten Rescue Cat Cam (LA)",
      "youtube_url": "https://www.youtube.com/watch?v=-m_nQT62B4Y", "format": "230/229"},
     {"id": "wcc-full-house-puppy", "category": "Kittens & Puppies", "title": "Full House Puppy Cam (WCC)",
