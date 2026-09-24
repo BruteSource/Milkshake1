@@ -26,7 +26,8 @@ enum class Screen { Regions, Grid, Viewer };
 Screen g_screen = Screen::Regions;
 int g_selected = -1;
 
-constexpr int kRegionRowHeight = 34;
+// 7 regions must fit in OT_H(240) below the 16px header: (240-16)/7 = 32.
+constexpr int kRegionRowHeight = 32;
 constexpr int kHeaderH = 16;
 constexpr int kFooterH = 20;
 constexpr int kGridTop = kHeaderH;

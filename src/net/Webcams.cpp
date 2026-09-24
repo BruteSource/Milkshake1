@@ -91,7 +91,10 @@ int fetchList(Webcam* out, int maxCount, const char* continentCode) {
         return 0;
     }
 
-    static const char* kThumbKeys[] = {"thumbnail", "icon", "preview"};
+    // icon first for the grid -- smallest size, fastest to fetch+decode
+    // when loading 4 thumbnails sequentially per page (PR #1 feedback:
+    // "thumbnail" made the grid visibly slow).
+    static const char* kThumbKeys[] = {"icon", "thumbnail", "preview"};
     static const char* kPreviewKeys[] = {"preview", "thumbnail", "icon"};
 
     int count = 0;
