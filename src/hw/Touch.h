@@ -16,4 +16,9 @@ bool rawSample(int16_t* rx, int16_t* ry);
 // "Finger down right now?" -- cheap check, no I2C read of coordinates.
 bool isTouched();
 
+// I2C bus scan, chip id/vendor id/G_MODE registers, and a 2s at-rest sample
+// of raw TD_STATUS (touch point count) to tell a noisy/misconfigured sensor
+// apart from a corrupted I2C read. Prints to Serial.
+void diag();
+
 }  // namespace touch

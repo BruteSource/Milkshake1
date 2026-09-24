@@ -26,6 +26,7 @@ void setup() {
     lcd.println("touch the screen");
 
     touch::begin();
+    touch::diag();
 
     Serial.println("setup done");
 }

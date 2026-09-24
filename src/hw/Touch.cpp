@@ -39,6 +39,46 @@ bool isTouched() {
     return digitalRead(PIN_INT) == LOW;
 }
 
+namespace {
+uint8_t readReg(uint8_t reg) {
+    Wire.beginTransmission(FT_ADDR);
+    Wire.write(reg);
+    if (Wire.endTransmission(false) != 0) return 0xFF;
+    if (Wire.requestFrom((uint8_t)FT_ADDR, (uint8_t)1) != 1) return 0xFF;
+    return Wire.read();
+}
+}  // namespace
+
+void diag() {
+    Serial.println("[touch diag] I2C scan:");
+    int found = 0;
+    for (uint8_t a = 1; a < 127; ++a) {
+        Wire.beginTransmission(a);
+        if (Wire.endTransmission() == 0) {
+            Serial.printf("[touch diag]   device at 0x%02X\n", a);
+            ++found;
+        }
+    }
+    if (!found) Serial.println("[touch diag]   (none -- bus/wiring problem)");
+
+    Serial.printf("[touch diag] INT pin=%d  chipid(0xA3)=0x%02X  vendor(0xA8)=0x%02X  gmode(0xA4)=0x%02X  threshold(0x80)=0x%02X\n",
+                  digitalRead(PIN_INT), readReg(0xA3), readReg(0xA8), readReg(0xA4), readReg(0x80));
+
+    Serial.println("[touch diag] sampling TD_STATUS (reg 0x02 alone) at rest for 2s -- do NOT touch the screen:");
+    int nonzero = 0, total = 0, readFail = 0;
+    uint32_t t0 = millis();
+    while (millis() - t0 < 2000) {
+        uint8_t td = readReg(0x02);
+        total++;
+        if (td == 0xFF) readFail++;
+        else if ((td & 0x0F) != 0) nonzero++;
+        delay(15);
+    }
+    Serial.printf("[touch diag] TD_STATUS samples=%d nonzero=%d readFail=%d\n", total, nonzero, readFail);
+    Serial.println("[touch diag] if nonzero is high here (untouched), the sensor itself is reporting phantom "
+                    "touches -- not an I2C read bug. If readFail is high, the bus read is failing (wiring/pull-ups).");
+}
+
 bool rawSample(int16_t* rx, int16_t* ry) {
     uint8_t d[7];
     Wire.beginTransmission(FT_ADDR);
