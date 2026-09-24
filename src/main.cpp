@@ -4,12 +4,16 @@
 // "live" means re-fetching the JPEG snapshot on an interval, matching how
 // the source webcams themselves typically update.
 #include <Arduino.h>
+#include <esp_sleep.h>
+#include <driver/rtc_io.h>
 
 #include "hw/Display.h"
 #include "hw/Touch.h"
 #include "hw/Wifi.h"
 #include "net/Http.h"
 #include "net/Webcams.h"
+#include "net/Livecams.h"
+#include "net/Mjpeg.h"
 #include "Secrets.h"
 
 namespace {
@@ -22,8 +26,30 @@ webcams::Webcam g_webcams[kMaxWebcams];
 int g_webcamCount = 0;
 int g_page = 0;
 
-enum class Screen { Regions, Grid, Viewer };
-Screen g_screen = Screen::Regions;
+constexpr int kMaxLiveCams = 40;
+livecams::Camera g_liveCams[kMaxLiveCams];
+int g_liveCamCount = 0;
+char g_liveCategories[8][24];
+int g_liveCategoryCount = 0;
+int g_liveCategoryFilter = -1;  // index into g_liveCategories
+int g_liveFilteredIdx[kMaxLiveCams];  // indices into g_liveCams matching the filter
+int g_liveFilteredCount = 0;
+mjpeg::Client g_mjpegClient;
+uint32_t g_lastMjpegFrame = 0;
+
+// --- Power management -----------------------------------------------------
+// Soft sleep: dim the panel and pause network polling after 2 min idle,
+// instant wake on any touch. Deep sleep: after 5 min idle (independent of
+// soft sleep), real hardware deep sleep -- only the BOOT button (GPIO0,
+// RTC-capable) can wake it, which means a full reboot back to the Home
+// screen, not a resume.
+constexpr uint32_t kSoftSleepMs = 2UL * 60 * 1000;
+constexpr uint32_t kDeepSleepMs = 5UL * 60 * 1000;
+uint32_t g_lastActivity = 0;
+bool g_softAsleep = false;
+
+enum class Screen { Home, Regions, Grid, Viewer, LiveCategories, LiveGrid, LiveViewer };
+Screen g_screen = Screen::Home;
 int g_selected = -1;
 
 // 7 regions must fit in OT_H(240) below the 16px header: (240-16)/7 = 32.
@@ -47,6 +73,33 @@ void showError(const char* msg) {
     lcd.println(msg);
 }
 
+// --- Home screen ---------------------------------------------------------
+
+void enterRegions();  // fwd decl, Windy webcam browser (below)
+void enterLiveCategories();  // fwd decl, live nature cams (below)
+
+void drawHome() {
+    lcd.fillScreen(TFT_BLACK);
+    lcd.setTextSize(1);
+    lcd.setTextColor(TFT_WHITE, TFT_BLACK);
+    lcd.setCursor(6, 2);
+    lcd.println("CYD-Milkshake");
+    const char* items[] = {"Live Nature Cams", "Weather Webcams"};
+    constexpr int kRowH = (OT_H - 16) / 2;
+    for (int i = 0; i < 2; i++) {
+        int y = 16 + i * kRowH;
+        lcd.drawFastHLine(0, y, OT_W, TFT_DARKGREY);
+        lcd.setCursor(10, y + kRowH / 2 - 8);
+        lcd.setTextSize(2);
+        lcd.println(items[i]);
+    }
+}
+
+void enterHome() {
+    g_screen = Screen::Home;
+    drawHome();
+}
+
 // --- Regions screen ---------------------------------------------------
 
 void drawRegions() {
@@ -54,7 +107,7 @@ void drawRegions() {
     lcd.setTextSize(1);
     lcd.setTextColor(TFT_WHITE, TFT_BLACK);
     lcd.setCursor(6, 2);
-    lcd.println("select a region");
+    lcd.println("< home  |  select a region");
     for (int i = 0; i < webcams::kRegionCount; i++) {
         int y = 16 + i * kRegionRowHeight;
         lcd.drawFastHLine(0, y, OT_W, TFT_DARKGREY);
@@ -192,6 +245,197 @@ void enterViewer(int idx) {
     loadAndShowImage(idx);
 }
 
+// --- Live nature cams (relay-backed, real motion at ~1fps) ---------------
+
+void buildLiveCategories() {
+    g_liveCategoryCount = 0;
+    for (int i = 0; i < g_liveCamCount; i++) {
+        bool found = false;
+        for (int j = 0; j < g_liveCategoryCount; j++) {
+            if (strcmp(g_liveCategories[j], g_liveCams[i].category) == 0) {
+                found = true;
+                break;
+            }
+        }
+        if (!found && g_liveCategoryCount < 8) {
+            strlcpy(g_liveCategories[g_liveCategoryCount], g_liveCams[i].category,
+                    sizeof(g_liveCategories[0]));
+            g_liveCategoryCount++;
+        }
+    }
+}
+
+void drawLiveCategories() {
+    lcd.fillScreen(TFT_BLACK);
+    lcd.setTextSize(1);
+    lcd.setTextColor(TFT_WHITE, TFT_BLACK);
+    lcd.setCursor(6, 2);
+    lcd.println("< home  |  live nature cams");
+    int rowH = (OT_H - 16) / (g_liveCategoryCount > 0 ? g_liveCategoryCount : 1);
+    for (int i = 0; i < g_liveCategoryCount; i++) {
+        int y = 16 + i * rowH;
+        lcd.drawFastHLine(0, y, OT_W, TFT_DARKGREY);
+        lcd.setCursor(10, y + rowH / 2 - 8);
+        lcd.setTextSize(2);
+        lcd.println(g_liveCategories[i]);
+    }
+}
+
+void enterLiveCategories() {
+    g_screen = Screen::LiveCategories;
+    if (g_liveCamCount == 0) {
+        lcd.fillScreen(TFT_BLACK);
+        lcd.setCursor(10, 10);
+        lcd.setTextColor(TFT_WHITE, TFT_BLACK);
+        lcd.println("loading cameras...");
+        g_liveCamCount = livecams::fetchList(g_liveCams, kMaxLiveCams);
+        if (g_liveCamCount == 0) {
+            lcd.setCursor(10, 30);
+            lcd.setTextColor(TFT_RED, TFT_BLACK);
+            lcd.println("relay unreachable");
+            delay(1500);
+            enterHome();
+            return;
+        }
+        buildLiveCategories();
+    }
+    drawLiveCategories();
+}
+
+void buildLiveFiltered(int categoryIdx) {
+    g_liveCategoryFilter = categoryIdx;
+    g_liveFilteredCount = 0;
+    for (int i = 0; i < g_liveCamCount; i++) {
+        if (strcmp(g_liveCams[i].category, g_liveCategories[categoryIdx]) == 0) {
+            g_liveFilteredIdx[g_liveFilteredCount++] = i;
+        }
+    }
+}
+
+int liveGridPageCount() { return (g_liveFilteredCount + kPerPage - 1) / kPerPage; }
+
+void drawLiveGridChrome() {
+    lcd.fillScreen(TFT_BLACK);
+    lcd.drawFastHLine(0, kGridTop - 1, OT_W, TFT_DARKGREY);
+    lcd.drawFastVLine(kCellW, kGridTop, kGridBottom - kGridTop, TFT_DARKGREY);
+    lcd.drawFastHLine(0, kGridTop + kCellH, OT_W, TFT_DARKGREY);
+    lcd.drawFastHLine(0, kGridBottom, OT_W, TFT_DARKGREY);
+
+    lcd.setTextSize(1);
+    lcd.setTextColor(TFT_WHITE, TFT_BLACK);
+    lcd.setCursor(4, 2);
+    lcd.print("< categories");
+
+    char buf[16];
+    snprintf(buf, sizeof(buf), "page %d/%d", g_page + 1, liveGridPageCount());
+    lcd.setCursor(OT_W / 2 - 30, OT_H - kFooterH + 4);
+    lcd.print(buf);
+    lcd.setCursor(4, OT_H - kFooterH + 4);
+    lcd.print(g_page > 0 ? "< prev" : "");
+    lcd.setCursor(OT_W - 46, OT_H - kFooterH + 4);
+    lcd.print(g_page < liveGridPageCount() - 1 ? "next >" : "");
+}
+
+void drawLiveGridCell(int slot, int filteredIdx) {
+    int x, y, w, h;
+    cellRect(slot, &x, &y, &w, &h);
+    if (filteredIdx >= g_liveFilteredCount) return;
+    livecams::Camera& cam = g_liveCams[g_liveFilteredIdx[filteredIdx]];
+
+    lcd.setCursor(x + 4, y + 4);
+    lcd.setTextSize(1);
+    lcd.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    lcd.print("loading...");
+
+    uint8_t* buf = nullptr;
+    size_t len = 0;
+    if (!livecams::fetchJpeg(cam.id, &buf, &len)) {
+        lcd.fillRect(x + 1, y + 1, w - 2, h - 2, TFT_BLACK);
+        lcd.setCursor(x + 4, y + h / 2);
+        lcd.setTextColor(TFT_RED, TFT_BLACK);
+        lcd.print("fetch failed");
+        return;
+    }
+    lcd.fillRect(x + 1, y + 1, w - 2, h - 2, TFT_BLACK);
+    lcd.drawJpg(buf, len, x + 1, y + 1, w - 2, h - 14);
+    free(buf);
+
+    lcd.fillRect(x + 1, y + h - 13, w - 2, 12, TFT_BLACK);
+    lcd.setCursor(x + 3, y + h - 12);
+    lcd.setTextColor(TFT_WHITE, TFT_BLACK);
+    lcd.print(cam.title);
+}
+
+void drawLiveGrid() {
+    drawLiveGridChrome();
+    int base = g_page * kPerPage;
+    for (int slot = 0; slot < kPerPage; slot++) {
+        drawLiveGridCell(slot, base + slot);
+    }
+}
+
+void enterLiveGrid(int page) {
+    g_page = page;
+    g_screen = Screen::LiveGrid;
+    drawLiveGrid();
+}
+
+void selectLiveCategory(int categoryIdx) {
+    buildLiveFiltered(categoryIdx);
+    enterLiveGrid(0);
+}
+
+void enterLiveViewer(int filteredIdx) {
+    if (filteredIdx < 0 || filteredIdx >= g_liveFilteredCount) return;
+    g_selected = filteredIdx;
+    livecams::Camera& cam = g_liveCams[g_liveFilteredIdx[filteredIdx]];
+
+    lcd.fillScreen(TFT_BLACK);
+    lcd.setCursor(10, 10);
+    lcd.setTextColor(TFT_WHITE, TFT_BLACK);
+    lcd.println("connecting...");
+
+    char path[64];
+    snprintf(path, sizeof(path), "/live/%s.mjpg", cam.id);
+    if (!g_mjpegClient.begin(livecams::kRelayHost, livecams::kRelayPort, path)) {
+        lcd.setCursor(10, 30);
+        lcd.setTextColor(TFT_RED, TFT_BLACK);
+        lcd.println("connect failed");
+        delay(1500);
+        enterLiveGrid(g_page);
+        return;
+    }
+    g_screen = Screen::LiveViewer;
+    g_lastMjpegFrame = millis();
+}
+
+void exitLiveViewer() {
+    g_mjpegClient.end();
+    enterLiveGrid(g_page);
+}
+
+void enterSoftSleep() {
+    g_softAsleep = true;
+    lcd.setBrightness(0);
+}
+
+void wakeFromSoftSleep() {
+    g_softAsleep = false;
+    lcd.setBrightness(255);
+    g_lastActivity = millis();
+}
+
+void enterDeepSleep() {
+    lcd.setBrightness(0);
+    lcd.fillScreen(TFT_BLACK);
+    // BOOT button pull-up needs to be set on the RTC IO mux specifically --
+    // the regular pinMode() pull-up doesn't hold through deep sleep.
+    rtc_gpio_pullup_en(GPIO_NUM_0);
+    rtc_gpio_pulldown_dis(GPIO_NUM_0);
+    esp_sleep_enable_ext0_wakeup(GPIO_NUM_0, 0);  // wake on LOW (button pressed)
+    esp_deep_sleep_start();
+}
+
 // --- Touch calibration (unchanged) ---------------------------------------
 
 constexpr int kCalInset = 20;
@@ -304,26 +548,63 @@ void setup() {
         return;
     }
 
-    enterRegions();
+    enterHome();
+    g_lastActivity = millis();
 }
 
 void loop() {
+    // BOOT (GPIO0) also wakes from deep sleep, so right after such a wake
+    // the user may still be holding it down from that press. Require an
+    // observed release before arming the hold-for-calibration timer, so
+    // that doesn't also trigger calibration.
+    static bool bootArmed = false;
     static uint32_t bootHeldSince = 0;
-    if (digitalRead(0) == LOW) {
+    if (digitalRead(0) == HIGH) {
+        bootArmed = true;
+        bootHeldSince = 0;
+    } else if (bootArmed) {
         if (bootHeldSince == 0) {
             bootHeldSince = millis();
         } else if (millis() - bootHeldSince > 2000) {
             runCalibration();  // never returns -- ends in ESP.restart()
         }
-    } else {
-        bootHeldSince = 0;
     }
 
     touch::Point p = touch::poll();
 
-    if (p.pressed) {
+    if (p.down || p.pressed) g_lastActivity = millis();
+
+    // A touch that wakes from soft sleep is consumed by the wake itself --
+    // it shouldn't also act on whatever's underneath (e.g. immediately
+    // jumping into a grid cell the user only meant to wake the screen).
+    bool consumedByWake = false;
+    if (g_softAsleep && p.down) {
+        wakeFromSoftSleep();
+        consumedByWake = true;
+    }
+
+    if (!g_softAsleep && millis() - g_lastActivity > kSoftSleepMs) {
+        enterSoftSleep();
+    }
+    if (millis() - g_lastActivity > kDeepSleepMs) {
+        enterDeepSleep();  // never returns -- wakes via full reboot
+    }
+
+    if (p.pressed && !consumedByWake && !g_softAsleep) {
         switch (g_screen) {
+            case Screen::Home: {
+                if (p.y >= 16) {
+                    bool topHalf = (p.y - 16) < (OT_H - 16) / 2;
+                    if (topHalf) enterLiveCategories();
+                    else enterRegions();
+                }
+                break;
+            }
             case Screen::Regions: {
+                if (p.y < 16) {
+                    enterHome();
+                    break;
+                }
                 int row = (p.y - 16) / kRegionRowHeight;
                 if (row >= 0 && row < webcams::kRegionCount) selectRegion(row);
                 break;
@@ -345,10 +626,66 @@ void loop() {
             case Screen::Viewer:
                 enterGrid(g_page);
                 break;
+            case Screen::LiveCategories: {
+                if (p.y < 16) {
+                    enterHome();
+                    break;
+                }
+                int rowH = (OT_H - 16) / (g_liveCategoryCount > 0 ? g_liveCategoryCount : 1);
+                int row = (p.y - 16) / rowH;
+                if (row >= 0 && row < g_liveCategoryCount) selectLiveCategory(row);
+                break;
+            }
+            case Screen::LiveGrid: {
+                if (p.y < kHeaderH) {
+                    enterLiveCategories();
+                } else if (p.y >= kGridBottom) {
+                    if (p.x < OT_W / 3 && g_page > 0) enterLiveGrid(g_page - 1);
+                    else if (p.x > 2 * OT_W / 3 && g_page < liveGridPageCount() - 1) enterLiveGrid(g_page + 1);
+                } else {
+                    int col = p.x < kCellW ? 0 : 1;
+                    int row = p.y < kGridTop + kCellH ? 0 : 1;
+                    int idx = g_page * kPerPage + row * 2 + col;
+                    if (idx < g_liveFilteredCount) enterLiveViewer(idx);
+                }
+                break;
+            }
+            case Screen::LiveViewer:
+                exitLiveViewer();
+                break;
         }
     }
 
-    if (g_screen == Screen::Viewer && millis() - g_lastRefresh > kRefreshIntervalMs) {
+    if (g_screen == Screen::LiveViewer && !g_softAsleep) {
+        // Only call the (blocking-ish) nextFrame() once data has actually
+        // started arriving -- otherwise, between the relay's ~1fps frames,
+        // this loop would sit blocked inside nextFrame() for most of each
+        // second and only poll touch once per frame, making taps easy to
+        // miss entirely. Checking dataAvailable() first keeps every loop
+        // iteration fast (~15ms) so touch::poll() runs at full rate.
+        if (g_mjpegClient.dataAvailable()) {
+            uint8_t* buf = nullptr;
+            size_t len = 0;
+            if (g_mjpegClient.nextFrame(&buf, &len)) {
+                lcd.drawJpg(buf, len, 0, 0, OT_W, OT_H);
+                livecams::Camera& cam = g_liveCams[g_liveFilteredIdx[g_selected]];
+                lcd.fillRect(0, OT_H - 14, OT_W, 14, TFT_BLACK);
+                lcd.setCursor(2, OT_H - 12);
+                lcd.setTextSize(1);
+                lcd.setTextColor(TFT_WHITE, TFT_BLACK);
+                lcd.println(cam.title);
+                g_lastMjpegFrame = millis();
+            }
+        }
+        if (millis() - g_lastMjpegFrame > 20000) {
+            // Connection stalled/dropped -- reconnect to the same camera.
+            // (20s, not less: a cold-started relay source can take ~10s
+            // for its first frame -- yt-dlp resolve + first HLS segment.)
+            enterLiveViewer(g_selected);
+        }
+    }
+
+    if (g_screen == Screen::Viewer && !g_softAsleep && millis() - g_lastRefresh > kRefreshIntervalMs) {
         loadAndShowImage(g_selected);
     }
 

@@ -7,3 +7,4 @@
 .vscode/ipch
 compile_commands.json
 src/Secrets.h
+tools/livecam-relay/relay.log

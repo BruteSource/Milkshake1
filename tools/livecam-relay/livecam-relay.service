@@ -1,0 +1,15 @@
+[Unit]
+Description=CYD-Milkshake livecam relay (YouTube live cams -> local MJPEG)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=sean
+WorkingDirectory=/home/sean/livecam-relay
+ExecStart=/usr/bin/python3 /home/sean/livecam-relay/relay_server.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
